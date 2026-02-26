@@ -123,13 +123,9 @@ export class CommentaryEngine extends EventEmitter {
       return
     }
 
-    // Anthropic uses Claude CLI subscription — no API key needed
-    // OpenAI requires an API key
-    const apiKey = await this.keyResolver.getKey(modelConfig.provider)
-    if (!apiKey && modelConfig.provider === 'openai') {
-      this.emit('error', new Error('No OpenAI API key. Set it via "Kibitz: Set API Key" or OPENAI_API_KEY env var.'))
-      return
-    }
+    // Both providers use CLI subscriptions — no API keys needed
+    // Anthropic → claude CLI, OpenAI → codex CLI
+    const apiKey = '' // unused, both providers use subscriptions
 
     const systemPrompt = this.buildSystemPrompt()
     const userPrompt = this.buildUserPrompt(events)

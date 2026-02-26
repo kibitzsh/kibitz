@@ -1,6 +1,3 @@
-import * as fs from 'fs'
-import * as path from 'path'
-import * as os from 'os'
 import * as readline from 'readline'
 import { SessionWatcher } from '../core/watcher'
 import { CommentaryEngine } from '../core/commentary'
@@ -18,28 +15,9 @@ const c = {
   cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
 }
 
-class CLIKeyResolver implements KeyResolver {
-  private config: Record<string, string> = {}
-  private configPath = path.join(os.homedir(), '.kibitz', 'config.json')
-
-  constructor() {
-    this.load()
-  }
-
-  async getKey(provider: ProviderId): Promise<string | undefined> {
-    // Anthropic uses Claude CLI subscription — no API key needed
-    if (provider === 'anthropic') return 'subscription'
-    // OpenAI needs an actual key
-    return process.env.OPENAI_API_KEY || this.config.openai_api_key
-  }
-
-  private load(): void {
-    try {
-      if (fs.existsSync(this.configPath)) {
-        this.config = JSON.parse(fs.readFileSync(this.configPath, 'utf8'))
-      }
-    } catch { /* no config */ }
-  }
+// No API keys needed — Claude uses claude CLI, OpenAI uses codex CLI (both subscriptions)
+const noopKeyResolver: KeyResolver = {
+  async getKey(_provider: ProviderId) { return 'subscription' },
 }
 
 function parseArgs(args: string[]): { model: ModelId; focus: string; agent: string | null } {
@@ -79,9 +57,9 @@ ${c.bold('Options:')}
   --agent <name>    Filter by agent (claude, codex)
   --help, -h        Show this help
 
-${c.bold('Environment:')}
-  Claude models use your Claude subscription (via CLI) — no API key needed.
-  OPENAI_API_KEY     OpenAI API key (only needed for GPT models)
+${c.bold('Requirements:')}
+  Claude models → requires 'claude' CLI (your subscription)
+  GPT models    → requires 'codex' CLI (your subscription)
 
 ${c.bold('Interactive:')}
   Type while running to update focus/tone instructions.
@@ -112,9 +90,8 @@ async function main() {
   if (opts.agent) console.log(c.dim(`  Agent filter: ${opts.agent}`))
   console.log(c.dim('  Watching for sessions... (type to change focus, Ctrl+C to exit)\n'))
 
-  const keyResolver = new CLIKeyResolver()
   const watcher = new SessionWatcher()
-  const engine = new CommentaryEngine(keyResolver)
+  const engine = new CommentaryEngine(noopKeyResolver)
 
   engine.setModel(opts.model)
   if (opts.focus) engine.setFocus(opts.focus)

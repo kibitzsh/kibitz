@@ -25,10 +25,6 @@
       {
         "command": "kibitz.switchModel",
         "title": "Kibitz: Switch Model"
-      },
-      {
-        "command": "kibitz.setApiKey",
-        "title": "Kibitz: Set API Key"
       }
     ]
   },

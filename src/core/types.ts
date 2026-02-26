@@ -63,6 +63,7 @@ export interface Provider {
   ): Promise<string>
 }
 
+// KeyResolver kept for backwards compat but both providers use CLI subscriptions
 export interface KeyResolver {
   getKey(provider: ProviderId): Promise<string | undefined>
 }
