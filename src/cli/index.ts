@@ -73,8 +73,10 @@ function timeStr(): string {
 }
 
 function formatCommentary(text: string): string {
-  // Convert **bold** to terminal bold
-  return text.replace(/\*\*(.+?)\*\*/g, (_, inner) => c.bold(inner))
+  return text
+    .replace(/\*\*(.+?)\*\*/g, (_, inner) => c.bold(inner))
+    .replace(/`([^`]+)`/g, (_, code) => c.cyan(code))
+    .replace(/^[-*] /gm, '  • ')
 }
 
 function agentColor(agent: string): (s: string) => string {

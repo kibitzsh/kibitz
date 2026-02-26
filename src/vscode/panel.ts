@@ -230,10 +230,19 @@ function getInlineHtml(providers: ProviderStatus[]): string {
   }
   .commentary {
     font-size: 13px;
-    line-height: 1.5;
-    white-space: pre-wrap;
+    line-height: 1.6;
   }
   .commentary strong { font-weight: 700; }
+  .commentary ul {
+    margin: 2px 0;
+    padding-left: 16px;
+  }
+  .commentary li {
+    margin-bottom: 2px;
+  }
+  .commentary p {
+    margin: 2px 0;
+  }
   .error-entry {
     color: #ef4444;
     padding: 6px 8px;
@@ -306,6 +315,7 @@ function getInlineHtml(providers: ProviderStatus[]): string {
   const pauseBtn = document.getElementById('pause-btn');
   const focusInput = document.getElementById('focus-input');
   let currentEntry = null;
+  let currentRawText = '';
   let autoScroll = true;
   let paused = false;
 
@@ -319,7 +329,30 @@ function getInlineHtml(providers: ProviderStatus[]): string {
   }
 
   function renderCommentary(text) {
-    return text.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+    // Split into lines, group bullets into <ul>, wrap rest in <p>
+    const lines = text.split('\\n');
+    let html = '';
+    let inList = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const bullet = trimmed.match(/^[-*]\\s+(.*)/);
+      if (bullet) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        html += '<li>' + fmt(bullet[1]) + '</li>';
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<p>' + fmt(trimmed) + '</p>';
+      }
+    }
+    if (inList) html += '</ul>';
+    return html;
+  }
+
+  function fmt(s) {
+    return s
+      .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+      .replace(/\`([^\`]+)\`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 4px;border-radius:2px;font-size:12px">$1</code>');
   }
 
   function timeStr(ts) {
@@ -365,14 +398,15 @@ function getInlineHtml(providers: ProviderStatus[]): string {
       \`;
       feed.appendChild(div);
       currentEntry = div;
+      currentRawText = '';
       scrollToBottom();
     }
 
     if (msg.type === 'commentary-chunk') {
       const el = document.getElementById('current-commentary');
       if (el) {
-        const text = el.textContent.replace('|', '') + msg.value;
-        el.innerHTML = renderCommentary(text) + '<span class="cursor">|</span>';
+        currentRawText += msg.value;
+        el.innerHTML = renderCommentary(currentRawText) + '<span class="cursor">|</span>';
         scrollToBottom();
       }
     }

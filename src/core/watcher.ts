@@ -42,23 +42,31 @@ export class SessionWatcher extends EventEmitter {
 
   getActiveSessions(): SessionInfo[] {
     const now = Date.now()
-    const sessions: SessionInfo[] = []
+    // Deduplicate: keep only the most recent session per project+agent combo
+    const best = new Map<string, { info: SessionInfo; mtime: number }>()
     for (const w of this.watched.values()) {
       try {
         const stat = fs.statSync(w.filePath)
-        if (now - stat.mtimeMs < 5 * 60 * 1000) {
-          sessions.push({
-            id: path.basename(w.filePath, '.jsonl'),
-            projectName: w.projectName,
-            agent: w.agent,
-            source: this.detectSource(w),
-            filePath: w.filePath,
-            lastActivity: stat.mtimeMs,
+        // 2-minute window — only truly active sessions
+        if (now - stat.mtimeMs > 2 * 60 * 1000) continue
+        const key = `${w.agent}:${w.projectName}`
+        const existing = best.get(key)
+        if (!existing || stat.mtimeMs > existing.mtime) {
+          best.set(key, {
+            info: {
+              id: path.basename(w.filePath, '.jsonl'),
+              projectName: w.projectName,
+              agent: w.agent,
+              source: this.detectSource(w),
+              filePath: w.filePath,
+              lastActivity: stat.mtimeMs,
+            },
+            mtime: stat.mtimeMs,
           })
         }
       } catch { /* file gone */ }
     }
-    return sessions
+    return Array.from(best.values()).map(b => b.info)
   }
 
   private scan(): void {
