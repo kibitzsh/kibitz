@@ -232,6 +232,11 @@ function getInlineHtml(providers: ProviderStatus[]): string {
     font-size: 13px;
     line-height: 1.6;
   }
+  .session-name {
+    color: #555;
+    font-size: 11px;
+    font-family: monospace;
+  }
   .commentary strong { font-weight: 700; }
   .commentary ul {
     margin: 2px 0;
@@ -392,6 +397,7 @@ function getInlineHtml(providers: ProviderStatus[]): string {
           <span>\${entry.projectName}</span>
           <span class="source-badge">[\${entry.source}]</span>
           <span>\${timeStr(entry.timestamp)}</span>
+          <span class="session-name">\${entry.sessionId.slice(0, 8)}</span>
         </div>
         <div class="commentary" id="current-commentary"><span class="cursor">|</span></div>
       \`;
