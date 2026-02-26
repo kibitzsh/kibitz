@@ -1,0 +1,51 @@
+{
+  "name": "kibitz",
+  "displayName": "Kibitz",
+  "description": "Real-time entertaining commentary on AI coding agent sessions (Claude Code, Codex CLI)",
+  "version": "0.0.1",
+  "publisher": "vasily",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/vscode/extension.js",
+  "bin": {
+    "kibitz": "./dist/cli/index.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "kibitz.open",
+        "title": "Kibitz: Open"
+      },
+      {
+        "command": "kibitz.switchModel",
+        "title": "Kibitz: Switch Model"
+      },
+      {
+        "command": "kibitz.setApiKey",
+        "title": "Kibitz: Set API Key"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "npm run build:ext && npm run build:cli",
+    "build:ext": "esbuild src/vscode/extension.ts --bundle --outfile=dist/vscode/extension.js --external:vscode --format=cjs --platform=node --target=node18",
+    "build:cli": "esbuild src/cli/index.ts --bundle --outfile=dist/cli/index.js --format=cjs --platform=node --target=node18 --banner:js='#!/usr/bin/env node'",
+    "watch": "npm run build:ext -- --watch",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "picocolors": "^1.1.0"
+  }
+}
