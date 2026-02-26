@@ -16,28 +16,56 @@ const SYSTEM_PROMPT = `You oversee AI coding agents. Summarize what they did in 
 
 Rules:
 - Plain language. "Fixed the login page" not "Edited auth middleware".
-- Use bullet points to structure. Each bullet = one thing that happened or one observation.
-- Bold only names and key nouns (1-2 words max): **agent**, **tests**, **deploy**. Never bold full sentences.
-- Use UPPER CASE for emotional reactions: NICE CATCH, RISKY MOVE, GREAT WORK, NOT IDEAL, FINALLY.
-- No filler. No "methodical", "surgical", "clean work". Just facts and reactions.
+- **Bold** only key nouns, 1-2 words: **tests**, **deploy**, **production**. NEVER bold sentences.
+- UPPER CASE for emotional cheering or concern: GREAT FIND, NICE, RISKY, FINALLY, OOPS, NOT IDEAL.
+- No filler. No "methodical", "surgical", "disciplined", "clean work". Facts and reactions only.
+- Don't repeat what previous commentary already said.`
 
+// Format templates — one is randomly selected per commentary.
+// This ensures visual variety across messages.
+const FORMAT_TEMPLATES = [
+  // 1. Bullet list
+  `Use bullet points. Each bullet = one thing done or one observation.
 Example:
-The **room** agent worked on the settings feature:
-- Researched how settings currently work
-- Rewrote the settings page with new layout
-- Shipped without running **tests** — RISKY MOVE
-- At least checked for errors before pushing
+- Researched how the feature works
+- Rewrote the page with new layout
+- Shipped without **tests** — RISKY
+- Checked for errors before pushing`,
 
+  // 2. One-liner
+  `Write a single sentence. Punchy, complete, under 20 words.
+Example: Agent investigated the bug, found the root cause, and fixed it — NICE WORK.
+Example: Still reading code after 30 actions — hasn't changed anything yet.`,
+
+  // 3. Headline + context
+  `Start with a short UPPER CASE reaction (2-4 words), then one sentence of context.
 Example:
-Two agents active on **vasily** project:
-- One is investigating a login bug — reading code, hasn't changed anything yet
-- The other just deployed a fix to **production**. NICE — tested first.`
+SOLID APPROACH. Agent read the dependencies first, then made targeted changes across three files.
+Example:
+NOT GREAT. Pushed to **production** without running any tests — hope nothing breaks.`,
 
-// Adaptive batching: accumulate more context before summarizing
-const MIN_BATCH_SIZE = 5       // need enough actions for a meaningful summary
-const MAX_BATCH_SIZE = 40      // cap to avoid huge prompts
-const IDLE_TIMEOUT_MS = 20000  // flush after 20s of no new events
-const MAX_WAIT_MS = 60000      // never wait more than 60s from first event
+  // 4. Numbered progress
+  `Use numbered steps showing what the agent did in order. Add a final verdict line.
+Example:
+1. Read the existing code
+2. Made changes to the login flow
+3. Tested locally
+4. Pushed to **production**
+Verdict: proper process, nothing to flag.`,
+
+  // 5. Short + question
+  `Summarize in one sentence, then ask a pointed rhetorical question.
+Example:
+Agent rewrote the entire settings page and shipped it immediately. Did they test this at all?
+Example:
+Third time reading the same code. Lost, or just being thorough?`,
+]
+
+// Adaptive batching
+const MIN_BATCH_SIZE = 5
+const MAX_BATCH_SIZE = 40
+const IDLE_TIMEOUT_MS = 20000
+const MAX_WAIT_MS = 60000
 
 export class CommentaryEngine extends EventEmitter {
   private eventBuffer: KibitzEvent[] = []
@@ -52,6 +80,8 @@ export class CommentaryEngine extends EventEmitter {
   }
   private keyResolver: KeyResolver
   private paused = false
+  private recentCommentary: string[] = []
+  private lastFormatIdx = -1
 
   constructor(keyResolver: KeyResolver) {
     super()
@@ -117,11 +147,8 @@ export class CommentaryEngine extends EventEmitter {
 
     // Need minimum events for meaningful commentary
     if (this.eventBuffer.length < MIN_BATCH_SIZE || this.generating) {
-      // If generating, events will be processed after current generation
-      // If too few events, restart idle timer to wait for more
       if (this.eventBuffer.length > 0 && !this.generating) {
         this.idleTimer = setTimeout(() => {
-          // Force flush whatever we have after another idle period
           this.forceFlush()
         }, IDLE_TIMEOUT_MS)
       }
@@ -148,11 +175,20 @@ export class CommentaryEngine extends EventEmitter {
       this.emit('error', err)
     } finally {
       this.generating = false
-      // Process any events that accumulated during generation
       if (this.eventBuffer.length > 0) {
         this.flush()
       }
     }
+  }
+
+  private pickFormat(): string {
+    // Pick a random format that's different from the last one used
+    let idx: number
+    do {
+      idx = Math.floor(Math.random() * FORMAT_TEMPLATES.length)
+    } while (idx === this.lastFormatIdx && FORMAT_TEMPLATES.length > 1)
+    this.lastFormatIdx = idx
+    return FORMAT_TEMPLATES[idx]
   }
 
   private async generateCommentary(events: KibitzEvent[]): Promise<void> {
@@ -162,15 +198,11 @@ export class CommentaryEngine extends EventEmitter {
       return
     }
 
-    // Both providers use CLI subscriptions — no API keys needed
-    // Anthropic → claude CLI, OpenAI → codex CLI
-    const apiKey = '' // unused, both providers use subscriptions
-
+    const apiKey = ''
     const systemPrompt = this.buildSystemPrompt()
     const userPrompt = this.buildUserPrompt(events)
     const provider = this.providers[modelConfig.provider]
 
-    // Pick representative event for the entry metadata
     const lastEvent = events[events.length - 1]
 
     const entry: CommentaryEntry = {
@@ -198,6 +230,12 @@ export class CommentaryEngine extends EventEmitter {
       )
       entry.commentary = full
       this.emit('commentary-done', entry)
+
+      // Track recent commentary to avoid repetition
+      this.recentCommentary.push(full)
+      if (this.recentCommentary.length > 5) {
+        this.recentCommentary.shift()
+      }
     } catch (err) {
       this.emit('error', err)
     }
@@ -205,6 +243,10 @@ export class CommentaryEngine extends EventEmitter {
 
   private buildSystemPrompt(): string {
     let prompt = SYSTEM_PROMPT
+
+    // Add random format template
+    prompt += `\n\nFormat for this message:\n${this.pickFormat()}`
+
     if (this.userFocus.trim()) {
       prompt += `\n\nAdditional user instruction: ${this.userFocus}`
     }
@@ -226,6 +268,16 @@ export class CommentaryEngine extends EventEmitter {
       sections.push(`[${session}] (${evts.length} actions):\n${lines.join('\n')}`)
     }
 
-    return `${sections.join('\n\n')}\n\nAssess the overall approach and strategy. What's the agent doing right or wrong?`
+    let prompt = sections.join('\n\n')
+
+    // Include recent commentary so the LLM doesn't repeat itself
+    if (this.recentCommentary.length > 0) {
+      prompt += `\n\nPrevious commentary (don't repeat):\n`
+      prompt += this.recentCommentary.slice(-3).map(c => `- ${c.slice(0, 80)}...`).join('\n')
+    }
+
+    prompt += `\n\nSummarize what the agent did. Plain language, with your reaction.`
+
+    return prompt
   }
 }
