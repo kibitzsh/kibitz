@@ -203,15 +203,23 @@ export class CommentaryEngine extends EventEmitter {
     const userPrompt = this.buildUserPrompt(events)
     const provider = this.providers[modelConfig.provider]
 
-    const lastEvent = events[events.length - 1]
+    // Pick the dominant agent/project — whichever has the most events in the batch
+    const counts = new Map<string, { count: number; event: typeof events[0] }>()
+    for (const e of events) {
+      const key = `${e.agent}:${e.projectName}`
+      const existing = counts.get(key)
+      if (existing) existing.count++
+      else counts.set(key, { count: 1, event: e })
+    }
+    const dominant = Array.from(counts.values()).sort((a, b) => b.count - a.count)[0].event
 
     const entry: CommentaryEntry = {
       timestamp: Date.now(),
-      sessionId: lastEvent.sessionId,
-      projectName: lastEvent.projectName,
-      sessionTitle: lastEvent.sessionTitle,
-      agent: lastEvent.agent,
-      source: lastEvent.source,
+      sessionId: dominant.sessionId,
+      projectName: dominant.projectName,
+      sessionTitle: dominant.sessionTitle,
+      agent: dominant.agent,
+      source: dominant.source,
       eventSummary: events.map(e => e.summary).join(' → '),
       commentary: '',
     }
