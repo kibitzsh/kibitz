@@ -27,8 +27,10 @@ class CLIKeyResolver implements KeyResolver {
   }
 
   async getKey(provider: ProviderId): Promise<string | undefined> {
-    const envKey = provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'
-    return process.env[envKey] || this.config[`${provider}_api_key`]
+    // Anthropic uses Claude CLI subscription — no API key needed
+    if (provider === 'anthropic') return 'subscription'
+    // OpenAI needs an actual key
+    return process.env.OPENAI_API_KEY || this.config.openai_api_key
   }
 
   private load(): void {
@@ -78,8 +80,8 @@ ${c.bold('Options:')}
   --help, -h        Show this help
 
 ${c.bold('Environment:')}
-  ANTHROPIC_API_KEY  Anthropic API key (for Claude models)
-  OPENAI_API_KEY     OpenAI API key (for GPT models)
+  Claude models use your Claude subscription (via CLI) — no API key needed.
+  OPENAI_API_KEY     OpenAI API key (only needed for GPT models)
 
 ${c.bold('Interactive:')}
   Type while running to update focus/tone instructions.

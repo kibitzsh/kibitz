@@ -75,24 +75,16 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
 
+    // Set API Key — only needed for OpenAI (Claude uses subscription via CLI)
     vscode.commands.registerCommand('kibitz.setApiKey', async () => {
-      const provider = await vscode.window.showQuickPick(
-        [
-          { label: 'Anthropic (Claude)', providerId: 'anthropic' as ProviderId },
-          { label: 'OpenAI (GPT)', providerId: 'openai' as ProviderId },
-        ],
-        { placeHolder: 'Select provider' },
-      )
-      if (!provider) return
-
       const key = await vscode.window.showInputBox({
-        prompt: `Enter ${provider.label} API key`,
+        prompt: 'Enter OpenAI API key (Claude uses your subscription — no key needed)',
         password: true,
-        placeHolder: provider.providerId === 'anthropic' ? 'sk-ant-...' : 'sk-...',
+        placeHolder: 'sk-...',
       })
       if (key) {
-        await keyResolver.setKey(provider.providerId, key)
-        vscode.window.showInformationMessage(`${provider.label} API key saved.`)
+        await keyResolver.setKey('openai', key)
+        vscode.window.showInformationMessage('OpenAI API key saved.')
       }
     }),
   )
