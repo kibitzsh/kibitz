@@ -67,3 +67,11 @@ export interface Provider {
 export interface KeyResolver {
   getKey(provider: ProviderId): Promise<string | undefined>
 }
+
+export interface ProviderStatus {
+  provider: ProviderId
+  label: string
+  available: boolean
+  version?: string
+  error?: string
+}

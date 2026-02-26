@@ -127,3 +127,17 @@ export class OpenAIProvider implements Provider {
     })
   }
 }
+
+export function checkCodexCliAvailable(): { available: boolean; version?: string; error?: string } {
+  const isWindows = process.platform === 'win32'
+  const cmd = isWindows ? 'codex.cmd' : 'codex'
+  try {
+    const version = execSync(`${cmd} --version`, {
+      encoding: 'utf-8', timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    return { available: true, version }
+  } catch {
+    return { available: false, error: 'Codex CLI not found' }
+  }
+}

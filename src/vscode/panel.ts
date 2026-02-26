@@ -3,7 +3,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { CommentaryEngine } from '../core/commentary'
 import { SessionWatcher } from '../core/watcher'
-import { CommentaryEntry, ModelId, MODELS } from '../core/types'
+import { CommentaryEntry, ModelId, MODELS, ProviderStatus } from '../core/types'
 
 export class KibitzPanel {
   private panel: vscode.WebviewPanel
@@ -13,6 +13,7 @@ export class KibitzPanel {
     private context: vscode.ExtensionContext,
     private engine: CommentaryEngine,
     private watcher: SessionWatcher,
+    private providers: ProviderStatus[],
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'kibitz',
@@ -51,6 +52,7 @@ export class KibitzPanel {
     const sessions = this.watcher.getActiveSessions()
     this.panel.webview.postMessage({ type: 'sessions', value: sessions.length })
     this.panel.webview.postMessage({ type: 'model', value: this.engine.getModel() })
+    this.panel.webview.postMessage({ type: 'providers', value: this.providers })
   }
 
   reveal(): void {
@@ -98,14 +100,25 @@ export class KibitzPanel {
     if (fs.existsSync(mediaPath)) {
       return fs.readFileSync(mediaPath, 'utf8')
     }
-    return getInlineHtml()
+    return getInlineHtml(this.providers)
   }
 }
 
-function getInlineHtml(): string {
-  const modelOptions = MODELS.map(
+function getInlineHtml(providers: ProviderStatus[]): string {
+  // Only show models whose provider is available
+  const availableProviders = new Set(providers.filter(p => p.available).map(p => p.provider))
+  const availableModels = MODELS.filter(m => availableProviders.has(m.provider))
+  const modelOptions = availableModels.map(
     m => `<option value="${m.id}">${m.label}</option>`,
   ).join('\n')
+
+  // Provider status badges HTML
+  const providerBadges = providers.map(p => {
+    const dot = p.available ? '●' : '○'
+    const color = p.available ? '#22c55e' : '#6b7280'
+    const title = p.available ? `${p.label} CLI v${p.version}` : `${p.label} CLI not found`
+    return `<span class="provider-badge" title="${title}" style="color: ${color}">${dot} ${p.label}</span>`
+  }).join('\n')
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -143,6 +156,7 @@ function getInlineHtml(): string {
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    flex-wrap: wrap;
   }
   .header h1 {
     font-size: 14px;
@@ -157,6 +171,11 @@ function getInlineHtml(): string {
   }
   .badge-sessions { background: var(--badge-vscode); color: white; }
   .badge-model { background: #374151; color: #d1d5db; border: 1px solid #4b5563; }
+  .provider-badge {
+    font-size: 11px;
+    font-weight: 500;
+    cursor: default;
+  }
   .controls {
     display: flex;
     gap: 6px;
@@ -259,8 +278,8 @@ function getInlineHtml(): string {
 <body>
   <div class="header">
     <h1>KIBITZ</h1>
+    ${providerBadges}
     <span class="badge badge-sessions" id="sessions">0 sessions</span>
-    <span class="badge badge-model" id="model-badge">opus</span>
     <div class="controls">
       <select id="model-select">
         ${modelOptions}
@@ -283,7 +302,6 @@ function getInlineHtml(): string {
   const feed = document.getElementById('feed');
   const empty = document.getElementById('empty');
   const sessionsEl = document.getElementById('sessions');
-  const modelBadge = document.getElementById('model-badge');
   const modelSelect = document.getElementById('model-select');
   const pauseBtn = document.getElementById('pause-btn');
   const focusInput = document.getElementById('focus-input');
@@ -301,7 +319,6 @@ function getInlineHtml(): string {
   }
 
   function renderCommentary(text) {
-    // Convert **bold** to <strong>
     return text.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
   }
 
@@ -384,12 +401,24 @@ function getInlineHtml(): string {
 
     if (msg.type === 'model') {
       modelSelect.value = msg.value;
-      const label = modelSelect.options[modelSelect.selectedIndex]?.text || msg.value;
-      modelBadge.textContent = label;
     }
 
     if (msg.type === 'set-focus') {
       focusInput.value = msg.value;
+    }
+
+    if (msg.type === 'providers') {
+      // Update provider badges dynamically if needed
+      const badges = document.querySelectorAll('.provider-badge');
+      msg.value.forEach((p, i) => {
+        if (badges[i]) {
+          const dot = p.available ? '●' : '○';
+          const color = p.available ? '#22c55e' : '#6b7280';
+          badges[i].style.color = color;
+          badges[i].textContent = dot + ' ' + p.label;
+          badges[i].title = p.available ? p.label + ' CLI v' + (p.version || '') : p.label + ' CLI not found';
+        }
+      });
     }
   });
 </script>
