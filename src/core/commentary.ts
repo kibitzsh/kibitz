@@ -209,6 +209,7 @@ export class CommentaryEngine extends EventEmitter {
       timestamp: Date.now(),
       sessionId: lastEvent.sessionId,
       projectName: lastEvent.projectName,
+      sessionTitle: lastEvent.sessionTitle,
       agent: lastEvent.agent,
       source: lastEvent.source,
       eventSummary: events.map(e => e.summary).join(' → '),

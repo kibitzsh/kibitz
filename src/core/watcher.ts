@@ -12,6 +12,7 @@ interface WatchedFile {
   agent: 'claude' | 'codex'
   watcher: fs.FSWatcher | null
   projectName: string
+  sessionTitle?: string
 }
 
 export class SessionWatcher extends EventEmitter {
@@ -56,6 +57,7 @@ export class SessionWatcher extends EventEmitter {
             info: {
               id: path.basename(w.filePath, '.jsonl'),
               projectName: w.projectName,
+              sessionTitle: w.sessionTitle,
               agent: w.agent,
               source: this.detectSource(w),
               filePath: w.filePath,
@@ -147,7 +149,8 @@ export class SessionWatcher extends EventEmitter {
       offset = stat.size // start from current end, only read new content
     } catch { return }
 
-    const entry: WatchedFile = { filePath, offset, agent, watcher: null, projectName }
+    const sessionTitle = agent === 'claude' ? extractSessionTitle(filePath) : undefined
+    const entry: WatchedFile = { filePath, offset, agent, watcher: null, projectName, sessionTitle }
 
     try {
       entry.watcher = fs.watch(filePath, () => {
@@ -188,6 +191,7 @@ export class SessionWatcher extends EventEmitter {
       for (const event of events) {
         // Override source detection
         event.source = this.detectSource(entry)
+        event.sessionTitle = entry.sessionTitle
 
         // Update project name from meta events
         if (event.type === 'meta' && event.details.cwd) {
@@ -247,6 +251,34 @@ export class SessionWatcher extends EventEmitter {
       }
     }
   }
+}
+
+function extractSessionTitle(filePath: string): string | undefined {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8')
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue
+      try {
+        const obj = JSON.parse(line)
+        if (obj.type === 'user') {
+          const msg = obj.message
+          if (!msg) continue
+          const content = msg.content
+          if (typeof content === 'string' && content.trim()) {
+            return content.trim().slice(0, 50)
+          }
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+                return block.text.trim().slice(0, 50)
+              }
+            }
+          }
+        }
+      } catch { /* skip bad lines */ }
+    }
+  } catch { /* unreadable */ }
+  return undefined
 }
 
 function extractProjectName(dirName: string): string {

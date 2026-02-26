@@ -1,6 +1,7 @@
 export interface KibitzEvent {
   sessionId: string
   projectName: string
+  sessionTitle?: string
   agent: 'claude' | 'codex'
   source: 'vscode' | 'cli'
   timestamp: number
@@ -12,6 +13,7 @@ export interface KibitzEvent {
 export interface SessionInfo {
   id: string
   projectName: string
+  sessionTitle?: string
   agent: 'claude' | 'codex'
   source: 'vscode' | 'cli'
   filePath: string
@@ -47,6 +49,7 @@ export interface CommentaryEntry {
   timestamp: number
   sessionId: string
   projectName: string
+  sessionTitle?: string
   agent: 'claude' | 'codex'
   source: 'vscode' | 'cli'
   eventSummary: string

@@ -397,7 +397,7 @@ function getInlineHtml(providers: ProviderStatus[]): string {
           <span>\${entry.projectName}</span>
           <span class="source-badge">[\${entry.source}]</span>
           <span>\${timeStr(entry.timestamp)}</span>
-          <span class="session-name">\${entry.sessionId.slice(0, 8)}</span>
+          <span class="session-name">\${entry.sessionTitle ? entry.sessionTitle.slice(0, 40) : entry.sessionId.slice(0, 8)}</span>
         </div>
         <div class="commentary" id="current-commentary"><span class="cursor">|</span></div>
       \`;
