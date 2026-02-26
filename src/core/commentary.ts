@@ -12,38 +12,38 @@ import {
 import { AnthropicProvider } from './providers/anthropic'
 import { OpenAIProvider } from './providers/openai'
 
-const SYSTEM_PROMPT = `You are Kibitz — a senior super-agent overseeing other AI coding agents. You monitor Claude Code and Codex CLI sessions, judge their decisions, and provide sharp, structured assessments.
+const SYSTEM_PROMPT = `You are Kibitz — a senior super-agent overseeing other AI coding agents. You see the big picture: what they're trying to accomplish, whether their approach is sound, and what they're getting wrong.
 
-Your role: You're the boss watching subordinates work. You approve, question, or shut down their moves.
+Your role: You're the boss reviewing a sequence of moves, not narrating each one. Judge the STRATEGY, not individual file operations.
 
-What you do:
-- **Approve good decisions**: tests before changes, clean diffs, proper tool use
-- **Call out problems**: skipped tests, risky operations, sloppy code, over-engineering
-- **Flag what matters**: security issues, performance concerns, architectural choices
+Rules:
+- Look at the full sequence of actions and assess the overall approach
+- Don't mention specific filenames or tool names unless they reveal a problem
+- Judge: Is the agent's strategy sound? Are they cutting corners? Being thorough? Wasting time?
+- One assessment per batch. Not one comment per action.
 
-Output format — use varied structure:
-- Use **bullet points** when listing multiple observations
-- Use short **one-liner** for simple actions
-- Use **bold** (**text**) for your verdict or key judgment
-- Use CAPS sparingly — only for genuine WTF moments or critical issues
-- Max 2-4 lines. No filler, no fluff. Every word must be useful info or judgment
-- Never repeat what the event summary already says — add your assessment, not a recap
+Format:
+- **Bold** for your verdict
+- Bullet points for multiple observations (2-3 max)
+- CAPS only for genuine critical issues
+- 2-4 lines total. Dense, useful judgment — no filler, no narration
 
-Bad output (filler): "Oh, a push to remote! That's the agent going live — shipping code to the world with confidence."
-Good output (useful): "**Clean pipeline.** Build → test → commit → push, no shortcuts. Selective staging too — no reckless \`git add .\`"
+Bad (per-file narration): "Reading watcher.ts, then editing commentary.ts, then running tsc..."
+Good (big picture): "**Solid refactor cycle.** Read first, edit, type-check. No blind changes. But skipped tests — confidence or laziness?"
 
-Bad output (wall): Long paragraph restating what happened with excessive enthusiasm.
-Good output (structured):
-- Rewrote auth middleware — **no tests touched**. Risky.
-- Using \`git add\` on specific files. Good discipline.
-- **Verdict: 7/10** — solid execution, missing test coverage.`
+Bad (restating events): "The agent committed and pushed the changes to remote."
+Good (judgment): "**Ship-and-pray.** Committed and pushed without running tests. Hope nothing breaks in prod."`
 
-const BATCH_SIZE = 5
-const BATCH_TIMEOUT_MS = 8000
+// Adaptive batching: accumulate more context before judging
+const MIN_BATCH_SIZE = 3       // don't comment on 1-2 actions
+const MAX_BATCH_SIZE = 20      // cap to avoid huge prompts
+const IDLE_TIMEOUT_MS = 5000   // flush after 5s of no new events
+const MAX_WAIT_MS = 25000      // never wait more than 25s from first event
 
 export class CommentaryEngine extends EventEmitter {
   private eventBuffer: KibitzEvent[] = []
-  private batchTimer: ReturnType<typeof setTimeout> | null = null
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
+  private maxTimer: ReturnType<typeof setTimeout> | null = null
   private generating = false
   private model: ModelId = DEFAULT_MODEL
   private userFocus = ''
@@ -96,21 +96,50 @@ export class CommentaryEngine extends EventEmitter {
 
     this.eventBuffer.push(event)
 
-    if (this.eventBuffer.length >= BATCH_SIZE) {
+    // Hard cap — flush immediately
+    if (this.eventBuffer.length >= MAX_BATCH_SIZE) {
       this.flush()
-    } else if (!this.batchTimer) {
-      this.batchTimer = setTimeout(() => this.flush(), BATCH_TIMEOUT_MS)
+      return
+    }
+
+    // Reset idle timer on each new event (wait for activity to settle)
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = setTimeout(() => this.flush(), IDLE_TIMEOUT_MS)
+
+    // Start max-wait timer on first event in batch
+    if (!this.maxTimer) {
+      this.maxTimer = setTimeout(() => this.flush(), MAX_WAIT_MS)
     }
   }
 
   private async flush(): Promise<void> {
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer)
-      this.batchTimer = null
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null }
+    if (this.maxTimer) { clearTimeout(this.maxTimer); this.maxTimer = null }
+
+    // Need minimum events for meaningful commentary
+    if (this.eventBuffer.length < MIN_BATCH_SIZE || this.generating) {
+      // If generating, events will be processed after current generation
+      // If too few events, restart idle timer to wait for more
+      if (this.eventBuffer.length > 0 && !this.generating) {
+        this.idleTimer = setTimeout(() => {
+          // Force flush whatever we have after another idle period
+          this.forceFlush()
+        }, IDLE_TIMEOUT_MS)
+      }
+      return
     }
 
-    if (this.eventBuffer.length === 0 || this.generating) return
+    this.doFlush()
+  }
 
+  private forceFlush(): void {
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null }
+    if (this.maxTimer) { clearTimeout(this.maxTimer); this.maxTimer = null }
+    if (this.eventBuffer.length === 0 || this.generating) return
+    this.doFlush()
+  }
+
+  private async doFlush(): Promise<void> {
     const batch = this.eventBuffer.splice(0)
     this.generating = true
 
@@ -184,10 +213,20 @@ export class CommentaryEngine extends EventEmitter {
   }
 
   private buildUserPrompt(events: KibitzEvent[]): string {
-    const lines = events.map(e => {
-      const badge = `[${e.agent}/${e.projectName}]`
-      return `${badge} ${e.type}: ${e.summary}`
-    })
-    return `Here's what just happened:\n\n${lines.join('\n')}\n\nGive your live commentary on these actions.`
+    // Group events by session for context
+    const bySession = new Map<string, KibitzEvent[]>()
+    for (const e of events) {
+      const key = `${e.agent}/${e.projectName}`
+      if (!bySession.has(key)) bySession.set(key, [])
+      bySession.get(key)!.push(e)
+    }
+
+    const sections: string[] = []
+    for (const [session, evts] of bySession) {
+      const lines = evts.map(e => `  ${e.type}: ${e.summary}`)
+      sections.push(`[${session}] (${evts.length} actions):\n${lines.join('\n')}`)
+    }
+
+    return `${sections.join('\n\n')}\n\nAssess the overall approach and strategy. What's the agent doing right or wrong?`
   }
 }
