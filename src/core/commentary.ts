@@ -36,9 +36,9 @@ Good (judgment): "**Ship-and-pray.** Committed and pushed without running tests.
 
 // Adaptive batching: accumulate more context before judging
 const MIN_BATCH_SIZE = 3       // don't comment on 1-2 actions
-const MAX_BATCH_SIZE = 20      // cap to avoid huge prompts
-const IDLE_TIMEOUT_MS = 5000   // flush after 5s of no new events
-const MAX_WAIT_MS = 25000      // never wait more than 25s from first event
+const MAX_BATCH_SIZE = 30      // cap to avoid huge prompts
+const IDLE_TIMEOUT_MS = 12000  // flush after 12s of no new events
+const MAX_WAIT_MS = 45000      // never wait more than 45s from first event
 
 export class CommentaryEngine extends EventEmitter {
   private eventBuffer: KibitzEvent[] = []
