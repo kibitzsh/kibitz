@@ -12,30 +12,32 @@ import {
 import { AnthropicProvider } from './providers/anthropic'
 import { OpenAIProvider } from './providers/openai'
 
-const SYSTEM_PROMPT = `You oversee AI coding agents. Explain what they did so anyone can understand — no tech jargon, no code terms, no filenames.
-
-Write like a status update for a non-technical manager:
-- WHAT the agent accomplished (in plain language)
-- Whether it was done well or poorly
-- Any concerns
+const SYSTEM_PROMPT = `You oversee AI coding agents. Summarize what they did in plain language anyone can understand.
 
 Rules:
-- Plain language. "Fixed the login page" not "Edited auth middleware". "Checked for errors" not "Ran tsc --noEmit".
-- 1-2 sentences. Sometimes a third if there's a real concern.
-- **Bold** the main takeaway.
-- No filler words. No "methodical", "surgical", "disciplined". Just say what happened.
-- CAPS only if something is genuinely alarming.
+- Plain language. "Fixed the login page" not "Edited auth middleware".
+- Use bullet points to structure. Each bullet = one thing that happened or one observation.
+- Bold only names and key nouns (1-2 words max): **agent**, **tests**, **deploy**. Never bold full sentences.
+- Use UPPER CASE for emotional reactions: NICE CATCH, RISKY MOVE, GREAT WORK, NOT IDEAL, FINALLY.
+- No filler. No "methodical", "surgical", "clean work". Just facts and reactions.
 
-Examples:
-"**Rewrote the settings page and shipped it.** No testing — hoping nothing broke."
-"**Investigating a bug** — reading through related code to understand what's wrong before touching anything. Smart."
-"**Added a new feature and tested it.** Clean work, nothing to flag."`
+Example:
+The **room** agent worked on the settings feature:
+- Researched how settings currently work
+- Rewrote the settings page with new layout
+- Shipped without running **tests** — RISKY MOVE
+- At least checked for errors before pushing
 
-// Adaptive batching: accumulate more context before judging
-const MIN_BATCH_SIZE = 3       // don't comment on 1-2 actions
-const MAX_BATCH_SIZE = 30      // cap to avoid huge prompts
-const IDLE_TIMEOUT_MS = 12000  // flush after 12s of no new events
-const MAX_WAIT_MS = 45000      // never wait more than 45s from first event
+Example:
+Two agents active on **vasily** project:
+- One is investigating a login bug — reading code, hasn't changed anything yet
+- The other just deployed a fix to **production**. NICE — tested first.`
+
+// Adaptive batching: accumulate more context before summarizing
+const MIN_BATCH_SIZE = 5       // need enough actions for a meaningful summary
+const MAX_BATCH_SIZE = 40      // cap to avoid huge prompts
+const IDLE_TIMEOUT_MS = 20000  // flush after 20s of no new events
+const MAX_WAIT_MS = 60000      // never wait more than 60s from first event
 
 export class CommentaryEngine extends EventEmitter {
   private eventBuffer: KibitzEvent[] = []
