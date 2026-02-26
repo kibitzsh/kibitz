@@ -393,7 +393,6 @@ function getInlineHtml(providers: ProviderStatus[]): string {
           <span class="source-badge">[\${entry.source}]</span>
           <span>\${timeStr(entry.timestamp)}</span>
         </div>
-        <div class="event-summary">\${entry.eventSummary}</div>
         <div class="commentary" id="current-commentary"><span class="cursor">|</span></div>
       \`;
       feed.appendChild(div);
