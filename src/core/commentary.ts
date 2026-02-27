@@ -22,7 +22,7 @@ Rules:
 - UPPER CASE short reactions when it helps: GREAT FIND, NICE MOVE, RISK ALERT, SOLID CHECK, WATCH OUT.
 - Vary judgment wording across messages; avoid repeating one catchphrase.
 - Always judge execution direction using the session goal + concrete actions in this batch.
-- Always include one verdict sentence with direction, confidence, and security status.
+- Close with a sentence that captures the current direction and momentum of the work.
 - Emoji are allowed when they add meaning (max 2 per commentary).
 - No filler. No "methodical", "surgical", "disciplined", "clean work". Facts and reactions only.
 - Don't repeat what previous commentary already said.
@@ -32,7 +32,7 @@ Rules:
 // Format templates — one is selected per commentary from the enabled style set.
 const FORMAT_TEMPLATES: Record<CommentaryStyleId, string> = {
   bullets: `Use bullet points. Each bullet = one thing done or one observation.
-End with one verdict sentence that includes direction, confidence, and security status.
+Close with a sentence on direction and momentum.
 Example:
 - Researched how the feature works
 - Rewrote the page with new layout
@@ -40,44 +40,44 @@ Example:
 - Checked for errors before pushing`,
 
   'one-liner': `Write a single sentence. Punchy, complete, under 20 words.
-Include a compact verdict in the same line (direction + security).
+One closing sentence on where this is headed.
 Example: Agent investigated the bug, found the root cause, and fixed it — NICE WORK.
 Example: Still reading code after 30 actions — hasn't changed anything yet.`,
 
   'headline-context': `Start with a short UPPER CASE reaction (2-4 words), then one sentence of context.
-Add a short verdict sentence after it.
+Close with a read on momentum.
 Example:
 SOLID APPROACH. Agent read the dependencies first, then made targeted changes across three files.
 Example:
 NOT GREAT. Pushed to **production** without running any tests — hope nothing breaks.`,
 
-  'numbered-progress': `Use numbered steps showing what the agent did in order. Add a final verdict line with direction, confidence, and security.
+  'numbered-progress': `Use numbered steps showing what the agent did in order. Finish with a momentum line.
 Example:
 1. Read the existing code
 2. Made changes to the login flow
 3. Tested locally
 4. Pushed to **production**
-Verdict: proper process, nothing to flag.`,
+Proper process, nothing to flag.`,
 
   'short-question': `Summarize in one sentence, then ask a pointed rhetorical question.
-Finish with one verdict sentence.
+End with a one-sentence read on direction.
 Example:
 Agent rewrote the entire settings page and shipped it immediately. Did they test this at all?
 Example:
 Third time reading the same code. Lost, or just being thorough?`,
 
   table: `Use a compact markdown table with columns: Action | Why it mattered.
-Include 3-5 rows max, then one verdict sentence (direction + confidence + security).
+Include 3-5 rows max, then one sentence on momentum.
 Example:
 | Action | Why it mattered |
 | --- | --- |
 | Ran tests | Verified changes before shipping |
 | Skipped lint | Could hide style regressions |
-Verdict: mostly careful, one loose end.`,
+Mostly careful, one loose end.`,
 
   'emoji-bullets': `Use bullet points with emoji tags to signal risk/quality.
 Use only these tags: ✅, ⚠️, 🔥, ❄️.
-End with one verdict sentence.
+Close with a direction sentence.
 Example:
 - ✅ Fixed the failing migration script
 - ⚠️ Pushed without rerunning integration tests
@@ -87,7 +87,7 @@ Example:
 Wins:
 Risks:
 Next:
-Each label should have 1-3 short bullets, then one verdict sentence.`,
+Each label should have 1-3 short bullets, then one line on where things stand.`,
 }
 
 const DEFAULT_FORMAT_STYLE_IDS: CommentaryStyleId[] = COMMENTARY_STYLE_OPTIONS.map((option) => option.id)
@@ -319,15 +319,17 @@ function summarizeActivity(
   return `reads=${reads}, writes=${writes}, searches=${searches}, commands=${commands}, tests=${tests}, errors=${errors}`
 }
 
-function summarizeVerdictEvidence(assessment: CommentaryAssessment): string {
+function summarizeClosingEvidence(assessment: CommentaryAssessment): string {
   if (assessment.progressSignals.length > 0) return assessment.progressSignals[0]
   if (assessment.driftSignals.length > 0) return assessment.driftSignals[0]
   return assessment.activitySummary
 }
 
-function createVerdictLine(assessment: CommentaryAssessment): string {
-  const evidence = summarizeVerdictEvidence(assessment)
-  return `Verdict: ${assessment.direction} (${assessment.confidence} confidence); security ${assessment.security}. Evidence: ${evidence}.`
+function createClosingLine(assessment: CommentaryAssessment): string {
+  const evidence = summarizeClosingEvidence(assessment)
+  const dir = assessment.direction === 'on-track' ? 'on track' : assessment.direction
+  const sec = assessment.security !== 'clean' ? ` Security is ${assessment.security}.` : ''
+  return `${evidence} — looks ${dir} with ${assessment.confidence} confidence.${sec}`
 }
 
 function extractRecentlyUsedJudgments(recentCommentary: string[]): string[] {
@@ -465,8 +467,9 @@ export function applyAssessmentSignals(commentary: string, assessment: Commentar
     out = `${label}: ${reason}\n${out}`
   }
 
-  if (!/\bverdict\s*:/i.test(out)) {
-    out = `${out}\n${createVerdictLine(assessment)}`
+  const hasClosingLine = /\bverdict\b|\bon.?track\b|\bdrifting\b|\bblocked\b|\bmomentum\b/i.test(out)
+  if (!hasClosingLine) {
+    out = `${out}\n${createClosingLine(assessment)}`
   }
   return out
 }
@@ -799,7 +802,7 @@ export class CommentaryEngine extends EventEmitter {
     }
 
     prompt += `\n\nSummarize only this session's actions. Plain language, with your reaction.`
-    prompt += `\nEnd with one explicit verdict sentence: direction + confidence + security + one evidence clue.`
+    prompt += `\nClose with one sentence about direction and momentum — weave in confidence and security naturally.`
     prompt += `\nNever mention IDs/logs/prompts/traces or internal data-collection steps.`
     prompt += `\nNever say "I", "I'll", "we", or any future plan.`
 
