@@ -27,7 +27,8 @@ Rules:
 - No filler. No "methodical", "surgical", "disciplined", "clean work". Facts and reactions only.
 - Don't repeat what previous commentary already said.
 - Never mention session IDs, logs, traces, prompts, JSONL files, or internal tooling.
-- Never write in first person ("I", "I'll", "we") or future tense plans.`
+- Never write in first person ("I", "I'll", "we") or future tense plans.
+- Never use the word "verdict". Write narrative, not a ruling.`
 
 // Format templates — one is selected per commentary from the enabled style set.
 const FORMAT_TEMPLATES: Record<CommentaryStyleId, string> = {
@@ -829,6 +830,9 @@ function sanitizeGeneratedCommentary(text: string): string {
   out = out.replace(/\blocal session logs?\b/gi, 'recent actions')
   out = out.replace(/\bsession logs?\b/gi, 'actions')
   out = out.replace(/\bsession id\b/gi, 'session')
+
+  // Strip any "Verdict:" label the LLM generates — keep the text after it
+  out = out.replace(/^verdict\s*:\s*/gim, '')
 
   const blockedLine = /\b(i['’]?ll|i will|we(?:'ll| will)?)\b.*\b(pull|fetch|read|inspect|scan|parse|load|check)\b.*\b(session|log|trace|jsonl|prompt|history)\b/i
   const keptLines = out.split('\n').filter(line => !blockedLine.test(line.trim()))
