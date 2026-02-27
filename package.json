@@ -4,6 +4,7 @@
   "description": "Real-time entertaining commentary on AI coding agent sessions (Claude Code, Codex CLI)",
   "version": "0.0.3",
   "publisher": "vasily",
+  "icon": "media/icon.png",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"

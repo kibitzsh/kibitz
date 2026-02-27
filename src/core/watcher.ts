@@ -49,6 +49,7 @@ export class SessionWatcher extends EventEmitter {
     const sessionsByKey = new Map<string, SessionInfo>()
     for (const w of this.watched.values()) {
       if (w.ignore) continue
+      this.reconcileCodexSessionTitle(w)
       try {
         const stat = fs.statSync(w.filePath)
         if (now - stat.mtimeMs > SessionWatcher.ACTIVE_SESSION_WINDOW_MS) continue
@@ -197,6 +198,7 @@ export class SessionWatcher extends EventEmitter {
       stat = fs.statSync(entry.filePath)
     } catch { return }
 
+    this.reconcileCodexSessionTitle(entry)
     if (stat.size <= entry.offset) return
 
     const fd = fs.openSync(entry.filePath, 'r')
@@ -209,13 +211,6 @@ export class SessionWatcher extends EventEmitter {
     const lines = chunk.split('\n').filter(l => l.trim())
 
     for (const line of lines) {
-      if (entry.agent === 'codex') {
-        const threadTitle = getCodexThreadTitle(entry.sessionId)
-        if (threadTitle && threadTitle !== entry.sessionTitle) {
-          entry.sessionTitle = threadTitle
-        }
-      }
-
       if (entry.agent === 'codex' && isKibitzInternalCodexLine(line)) {
         entry.ignore = true
         break
@@ -264,6 +259,21 @@ export class SessionWatcher extends EventEmitter {
 
         this.emit('event', event)
       }
+    }
+  }
+
+  private reconcileCodexSessionTitle(entry: WatchedFile): void {
+    if (entry.agent !== 'codex') return
+
+    const threadTitle = getCodexThreadTitle(entry.sessionId)
+    if (threadTitle) {
+      if (threadTitle !== entry.sessionTitle) entry.sessionTitle = threadTitle
+      return
+    }
+
+    // Avoid persisting prompt/instruction text as a session label when no thread title exists.
+    if (entry.sessionTitle && isNoiseSessionTitle(entry.sessionTitle)) {
+      entry.sessionTitle = undefined
     }
   }
 
@@ -437,39 +447,7 @@ function extractCodexSessionTitleFromLog(filePath: string): string | undefined {
       } catch { /* skip bad lines */ }
     }
 
-    // Prefer explicit user_message events. These contain the real typed prompt.
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue
-      try {
-        const obj: any = JSON.parse(line)
-        if (obj.type === 'event_msg' && obj.payload?.type === 'user_message') {
-          const title = pickSessionTitle(String(obj.payload.message || ''))
-          if (title) return title
-        }
-      } catch { /* skip bad lines */ }
-    }
-
-    // Fallback: some old logs may only have response_item user blocks.
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue
-      try {
-        const obj: any = JSON.parse(line)
-        if (obj.type === 'response_item' && obj.payload?.type === 'message' && obj.payload?.role === 'user') {
-          const contentBlocks = obj.payload.content
-          if (Array.isArray(contentBlocks)) {
-            for (const block of contentBlocks) {
-              const text = typeof block?.text === 'string'
-                ? block.text
-                : typeof block?.input_text === 'string'
-                  ? block.input_text
-                  : ''
-              const title = pickSessionTitle(text)
-              if (title) return title
-            }
-          }
-        }
-      } catch { /* skip bad lines */ }
-    }
+    // Do not derive Codex titles from raw user prompts. Prompt text leaks into labels.
   } catch { /* unreadable */ }
   return undefined
 }
@@ -693,6 +671,12 @@ function isNoiseSessionTitle(text: string): boolean {
 
   if (normalized.startsWith('the user opened the file ')
     || normalized.includes('may or may not be related to the current task')) return true
+  if (/^\d+\)\s+after deciding to use a skill\b/.test(normalized)
+    || /^\d+\)\s+when `?skill\.md`? references\b/.test(normalized)
+    || /^\d+\)\s+if `?skill\.md`? points\b/.test(normalized)
+    || /^\d+\)\s+if `?scripts\/`? exist\b/.test(normalized)
+    || /^\d+\)\s+if `?assets\/`? or templates exist\b/.test(normalized)
+    || /^perform( a)? repository commit\b/.test(normalized)) return true
   if (normalized.startsWith('agents.md instructions for')
     || normalized.startsWith('a skill is a set of local instructions')
     || normalized.startsWith('researched how the feature works')

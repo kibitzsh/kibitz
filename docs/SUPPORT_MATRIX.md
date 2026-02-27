@@ -28,6 +28,21 @@ This document defines Kibitz compatibility guarantees for session control and di
 - Codex: `codex exec resume --json --skip-git-repo-check <sessionId> <prompt>`
 - Claude: `claude -p <prompt> --output-format stream-json --resume <sessionId>`
 
+## Dispatch Targeting Rules
+
+- Users can target any active session in the watcher list.
+- VS Code panel target model:
+  - `/1` is always new-session target for the current provider.
+  - `/2..N` map to existing active sessions.
+  - New terminal session flow is intentionally simple: choose `/1`, send prompt.
+  - click target badge, `/N`, `/N <prompt>`, and `N/ <prompt>` are supported.
+- Terminal CLI target model:
+  - `/sessions` prints indexed active sessions.
+  - `/target <index|agent:sessionId|new-codex|new-claude>` selects dispatch target.
+  - New terminal session flow is one command: `/target new-codex` or `/target new-claude`.
+  - plain non-slash text sends to selected target.
+- Dispatch must never silently reroute to another session when selected target is stale/missing.
+
 ## New Session Dispatch
 
 - VS Code panel launches interactive session via `dist/vscode/interactive-launcher.js` in an integrated terminal.

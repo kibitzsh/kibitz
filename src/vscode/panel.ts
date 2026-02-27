@@ -895,8 +895,12 @@ export function getInlineHtml(
   let finalCommentaryText = '';
   let streamDone = false;
   let typingTimer = null;
-  const TYPING_INTERVAL_MS = 18;
-  const TYPING_CHARS_PER_TICK = 2;
+  let typingAccumulator = 0;
+  let typingLastTickAt = 0;
+  const TYPING_INTERVAL_MS = 16;
+  const TYPING_CHARS_PER_SECOND = 110;
+  const TYPING_MAX_CHARS_PER_TICK = 4;
+  const TYPING_MAX_ELAPSED_MS = 120;
 
   function sessionKey(agent, sessionId) {
     return String(agent || '').toLowerCase() + ':' + String(sessionId || '').trim().toLowerCase();
@@ -1159,15 +1163,14 @@ export function getInlineHtml(
   }
 
   function clearFeed() {
-    if (typingTimer) {
-      clearInterval(typingTimer);
-      typingTimer = null;
-    }
+    stopTypingLoop();
     currentEntry = null;
     currentRawText = '';
     pendingTypingText = '';
     finalCommentaryText = '';
     streamDone = false;
+    typingAccumulator = 0;
+    typingLastTickAt = 0;
     feed.innerHTML = '';
     feed.appendChild(empty);
     empty.style.display = 'flex';
@@ -1181,10 +1184,7 @@ export function getInlineHtml(
   }
 
   function finalizeCurrentCommentary() {
-    if (typingTimer) {
-      clearInterval(typingTimer);
-      typingTimer = null;
-    }
+    stopTypingLoop();
 
     const node = document.getElementById('current-commentary');
     if (node) {
@@ -1198,29 +1198,66 @@ export function getInlineHtml(
     pendingTypingText = '';
     finalCommentaryText = '';
     streamDone = false;
+    typingAccumulator = 0;
+    typingLastTickAt = 0;
     scrollToBottom();
+  }
+
+  function stopTypingLoop() {
+    if (!typingTimer) return;
+    clearTimeout(typingTimer);
+    typingTimer = null;
+  }
+
+  function scheduleTypingTick() {
+    if (typingTimer) return;
+    typingTimer = setTimeout(runTypingTick, TYPING_INTERVAL_MS);
+  }
+
+  function runTypingTick() {
+    typingTimer = null;
+
+    if (!currentEntry) {
+      typingAccumulator = 0;
+      typingLastTickAt = 0;
+      return;
+    }
+
+    if (!pendingTypingText) {
+      if (streamDone) {
+        finalizeCurrentCommentary();
+      } else {
+        typingAccumulator = 0;
+        typingLastTickAt = 0;
+      }
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = typingLastTickAt > 0
+      ? Math.min(Math.max(now - typingLastTickAt, 0), TYPING_MAX_ELAPSED_MS)
+      : TYPING_INTERVAL_MS;
+    typingLastTickAt = now;
+    typingAccumulator += (TYPING_CHARS_PER_SECOND * elapsed) / 1000;
+
+    let take = Math.floor(typingAccumulator);
+    if (take < 1) {
+      scheduleTypingTick();
+      return;
+    }
+    take = Math.min(take, TYPING_MAX_CHARS_PER_TICK, pendingTypingText.length);
+    typingAccumulator = Math.max(0, typingAccumulator - take);
+
+    currentRawText += pendingTypingText.slice(0, take);
+    pendingTypingText = pendingTypingText.slice(take);
+    renderCurrentCommentary(true);
+    scrollToBottom();
+    scheduleTypingTick();
   }
 
   function ensureTypingLoop() {
     if (typingTimer) return;
-    typingTimer = setInterval(() => {
-      if (!currentEntry) {
-        clearInterval(typingTimer);
-        typingTimer = null;
-        return;
-      }
-
-      if (!pendingTypingText) {
-        if (streamDone) finalizeCurrentCommentary();
-        return;
-      }
-
-      const take = Math.min(TYPING_CHARS_PER_TICK, pendingTypingText.length);
-      currentRawText += pendingTypingText.slice(0, take);
-      pendingTypingText = pendingTypingText.slice(take);
-      renderCurrentCommentary(true);
-      scrollToBottom();
-    }, TYPING_INTERVAL_MS);
+    scheduleTypingTick();
   }
 
   function scrollToBottom() {
@@ -2215,6 +2252,8 @@ export function getInlineHtml(
       pendingTypingText = '';
       finalCommentaryText = '';
       streamDone = false;
+      typingAccumulator = 0;
+      typingLastTickAt = 0;
       renderCurrentCommentary(true);
       highlightSelectedEntries();
       scrollToBottom();

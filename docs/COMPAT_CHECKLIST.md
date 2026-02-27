@@ -15,6 +15,13 @@ Release must not ship unless all checks below pass.
 - [ ] Existing-session send works for Claude resume command construction.
 - [ ] New Codex interactive session launch works.
 - [ ] New Claude interactive session launch works.
+- [ ] VS Code: `/1` selects new-session target for current provider.
+- [ ] VS Code: `/2..N` map to existing active sessions.
+- [ ] VS Code: `/N <prompt>` sends to that specific target session.
+- [ ] CLI: `/sessions` index list matches active watcher sessions.
+- [ ] CLI: `/target <index>` selects the intended existing session.
+- [ ] CLI: `/target agent:sessionId` selects the intended existing session.
+- [ ] CLI: plain non-slash text is dispatched to current selected target.
 - [ ] Stale/missing target fails clearly and does not silently reroute.
 
 ## UX / Behavior Regression

@@ -22,6 +22,36 @@ Kibitz is a VS Code extension + CLI that watches Claude/Codex sessions, generate
 - Provider-aware model handling.
 - Strict dispatch status events: `queued`, `started`, `sent`, `failed`.
 
+## Prompt Dispatching
+
+Kibitz can send prompts to any active watched session (Claude or Codex), or start a new session on the current provider.
+
+### VS Code Panel
+
+- Target badges always include:
+  - `/1 New session (current provider)`
+  - `/2..N` existing active sessions from the watcher list
+- Starting a new terminal session is one step: select `/1` and send your prompt.
+- Select a target by:
+  - clicking a target badge
+  - typing `/N` (select only)
+  - typing `/N <prompt>` or `N/ <prompt>` (select + send)
+- Plain text (without target token) sends to the currently selected target.
+- Each send emits explicit status updates: `queued`, `started`, `sent`, `failed`.
+
+### Terminal CLI
+
+- Use `/sessions` to list active sessions with numeric indexes.
+- Set target with `/target <index|agent:sessionId|new-codex|new-claude>`.
+- Starting a new terminal session is one command: `/target new-codex` (or `/target new-claude`), then send plain text.
+- After target selection, plain text sends to that target.
+- Dispatch status is printed for every send: `queued`, `started`, `sent`, `failed`.
+
+### Scope and Limits
+
+- Targeting is limited to active sessions in the watcher window (recent activity).
+- Multi-target broadcast in one send is not implemented.
+
 ## Install (Development)
 
 ### Prerequisites
