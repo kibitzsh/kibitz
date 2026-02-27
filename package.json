@@ -51,7 +51,7 @@
     "deploy:vscode": "npm run check:compat && npm run typecheck && node scripts/deploy-vscode-extension.js",
     "watch": "npm run build:ext -- --watch",
     "package": "vsce package",
-    "publish:npm": "npm run build && node --input-type=module scripts/publish-npm.js"
+    "publish:npm": "npm run build && node scripts/publish-npm.js"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

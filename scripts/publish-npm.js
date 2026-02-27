@@ -2,12 +2,10 @@
 // Publishes the CLI as @kibitzsh/kibitz on npm.
 // vsce requires name="kibitz" (no scope), so we swap temporarily.
 
-import { readFileSync, writeFileSync } from 'fs';
-import { execSync } from 'child_process';
+const { readFileSync, writeFileSync } = require('fs');
+const { execSync } = require('child_process');
+const { resolve } = require('path');
 
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgPath = resolve(__dirname, '../package.json');
 const original = readFileSync(pkgPath, 'utf8');
 const pkg = JSON.parse(original);
