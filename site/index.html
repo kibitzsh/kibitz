@@ -364,6 +364,53 @@
         line-height: 1.4;
       }
 
+      .install-grid {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .install-block {
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: rgba(12, 20, 48, 0.66);
+        padding: 15px;
+      }
+
+      .install-label {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+
+      .install-code {
+        margin: 0;
+        padding: 10px 14px;
+        border-radius: 9px;
+        background: rgba(4, 9, 24, 0.7);
+        border: 1px solid rgba(176, 196, 255, 0.14);
+        font-family: "IBM Plex Mono", "SF Mono", "Fira Code", monospace;
+        font-size: 13px;
+        color: var(--accent);
+        overflow-x: auto;
+        white-space: pre;
+      }
+
+      .install-code code {
+        background: none;
+        padding: 0;
+      }
+
+      @media (max-width: 980px) {
+        .install-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
       .cta {
         margin-top: 22px;
         padding: 22px 24px;
@@ -464,6 +511,7 @@
           <span class="brand-name">Kibitz</span>
         </div>
         <nav class="nav">
+          <a href="#install">Install</a>
           <a href="#features">Features</a>
           <a href="#support">Support</a>
           <a href="/privacy.html">Privacy</a>
@@ -485,7 +533,7 @@
             <span class="chip"><span class="chip-dot"></span> Linux best effort</span>
           </div>
           <div class="actions">
-            <a class="btn btn-primary" href="https://github.com/kibitzsh/kibitz">Get Kibitz</a>
+            <a class="btn btn-primary" href="#install">Get Kibitz</a>
             <a class="btn btn-ghost" href="https://github.com/kibitzsh/kibitz#readme">Read docs</a>
           </div>
         </article>
@@ -520,6 +568,25 @@
             <h3>VS Code + CLI</h3>
             <p>Use the panel in VS Code or control the same workflow from terminal when you prefer keyboard-only ops.</p>
           </article>
+        </div>
+      </section>
+
+      <section class="panel section" id="install">
+        <h2>Install</h2>
+        <p class="lead">One command to get started on any platform.</p>
+        <div class="install-grid">
+          <div class="install-block">
+            <div class="install-label">Homebrew — macOS &amp; Linux</div>
+            <pre class="install-code"><code>brew install kibitzsh/tap/kibitz</code></pre>
+          </div>
+          <div class="install-block">
+            <div class="install-label">npm</div>
+            <pre class="install-code"><code>npm install -g @kibitzsh/kibitz</code></pre>
+          </div>
+          <div class="install-block">
+            <div class="install-label">VS Code Marketplace</div>
+            <pre class="install-code"><code>ext install kibitzsh.kibitz</code></pre>
+          </div>
         </div>
       </section>
 

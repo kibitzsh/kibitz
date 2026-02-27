@@ -6,6 +6,20 @@
 
 Kibitz is a VS Code extension + CLI that watches Claude/Codex sessions, generates live commentary, and lets you dispatch prompts to existing or new sessions from one composer.
 
+## Install
+
+**VS Code Extension** — install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kibitzsh.kibitz) or search `Kibitz` in the Extensions panel.
+
+**CLI — Homebrew (macOS / Linux)**
+```bash
+brew install kibitzsh/tap/kibitz
+```
+
+**CLI — npm**
+```bash
+npm install -g @kibitzsh/kibitz
+```
+
 ## Compatibility Matrix (Contract)
 
 | Platform | VS Code panel | Terminal CLI |
@@ -56,7 +70,7 @@ Kibitz can send prompts to any active watched session (Claude or Codex), or star
 - Targeting is limited to active sessions in the watcher window (recent activity).
 - Multi-target broadcast in one send is not implemented.
 
-## Install (Development)
+## Development Setup
 
 ### Prerequisites
 
