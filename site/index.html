@@ -3,11 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kibitz</title>
+    <title>Decode your agents | Kibitz</title>
     <meta
       name="description"
-      content="Kibitz monitors Claude Code and Codex sessions in real time, adds live commentary, and lets you dispatch prompts across sessions."
+      content="Decode your agents with Kibitz. Live commentary and prompt dispatch for Claude Code and Codex sessions, with macOS and Windows support."
     />
+    <meta name="theme-color" content="#0f172a" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://kibitz.sh/" />
+    <meta property="og:title" content="Decode your agents" />
+    <meta
+      property="og:description"
+      content="Live commentary and prompt dispatch for Claude Code and Codex sessions. Built for macOS and Windows."
+    />
+    <meta property="og:image" content="https://kibitz.sh/social-card.svg" />
+    <meta property="og:image:alt" content="Kibitz - Decode your agents" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Decode your agents" />
+    <meta
+      name="twitter:description"
+      content="Live commentary and prompt dispatch for Claude Code and Codex sessions."
+    />
+    <meta name="twitter:image" content="https://kibitz.sh/social-card.svg" />
+    <link rel="canonical" href="https://kibitz.sh/" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon.png" type="image/png" sizes="256x256" />
+    <link rel="apple-touch-icon" href="/icon.png" />
     <style>
       :root {
         --bg: #0f172a;
@@ -49,6 +70,19 @@
         box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
       }
 
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .logo {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+      }
+
       h1 {
         margin: 0;
         font-size: clamp(34px, 6vw, 58px);
@@ -71,11 +105,25 @@
       }
 
       p {
-        margin: 18px 0 0;
+        margin: 16px 0 0;
         color: var(--muted);
         font-size: clamp(16px, 2vw, 20px);
         line-height: 1.55;
         max-width: 760px;
+      }
+
+      .support {
+        margin-top: 18px;
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(15, 23, 42, 0.78);
+        padding: 8px 12px;
+        color: #dbeafe;
+        font-size: 14px;
       }
 
       .grid {
@@ -90,6 +138,10 @@
         padding: 12px 14px;
         color: #cbd5e1;
         background: rgba(15, 23, 42, 0.7);
+      }
+
+      .item b {
+        color: #e2e8f0;
       }
 
       .actions {
@@ -128,17 +180,21 @@
   <body>
     <main class="wrap">
       <section class="card">
-        <span class="tag">Kibitz</span>
-        <h1>Live commentary and dispatch for AI coding sessions</h1>
+        <div class="brand">
+          <img class="logo" src="/icon.svg" alt="Kibitz icon" />
+          <span class="tag">Kibitz</span>
+        </div>
+        <h1>Decode your agents</h1>
         <p>
-          Kibitz watches active Claude Code and Codex sessions, summarizes what agents are doing in plain language,
+          Kibitz watches active Claude Code and Codex sessions, translates agent activity into clear live commentary,
           and lets you route prompts to any active session from one place.
         </p>
+        <div class="support"><strong>Supported:</strong> macOS + Windows <span>|</span> Linux best effort</div>
 
         <div class="grid">
-          <div class="item">Real-time feed from multiple agent sessions.</div>
-          <div class="item">Targeted prompt dispatch to existing sessions or new sessions.</div>
-          <div class="item">VS Code extension + CLI workflow.</div>
+          <div class="item"><b>Live feed:</b> Real-time summaries across multiple agent sessions.</div>
+          <div class="item"><b>Dispatch:</b> Send prompts to existing sessions or start a new one instantly.</div>
+          <div class="item"><b>Workflow:</b> Use Kibitz inside VS Code or from the terminal CLI.</div>
         </div>
 
         <div class="actions">

@@ -3,3 +3,4 @@ dist/
 *.vsix
 .DS_Store
 CLAUDE.md
+AGENTS.md

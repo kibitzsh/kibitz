@@ -1,5 +1,9 @@
 # Kibitz
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Pages](https://github.com/kibitzsh/kibitz/actions/workflows/pages.yml/badge.svg)](https://github.com/kibitzsh/kibitz/actions/workflows/pages.yml)
+[![Website](https://img.shields.io/website?url=https%3A%2F%2Fkibitz.sh)](https://kibitz.sh)
+
 Kibitz is a VS Code extension + CLI that watches Claude/Codex sessions, generates live commentary, and lets you dispatch prompts to existing or new sessions from one composer.
 
 ## Compatibility Matrix (Contract)
@@ -165,6 +169,12 @@ Add Homebrew only if your CLI install demand is high and you want one-command se
 
 - [Support matrix details](docs/SUPPORT_MATRIX.md)
 - [Compatibility release checklist](docs/COMPAT_CHECKLIST.md)
+
+## Legal
+
+- [License (MIT)](LICENSE)
+- [Privacy Policy](PRIVACY.md)
+- [Terms of Use](TERMS.md)
 
 ## Cross-Platform Notes
 
