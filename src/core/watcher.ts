@@ -671,6 +671,8 @@ function isNoiseSessionTitle(text: string): boolean {
 
   if (normalized.startsWith('the user opened the file ')
     || normalized.includes('may or may not be related to the current task')) return true
+  // Drop file-reference lines like "logo.svg: media/logo.svg" or "file.ts: src/file.ts"
+  if (/^[\w][\w.\-]*\.[a-z]{2,6}:\s/i.test(normalized)) return true
   if (/^\d+\)\s+after deciding to use a skill\b/.test(normalized)
     || /^\d+\)\s+when `?skill\.md`? references\b/.test(normalized)
     || /^\d+\)\s+if `?skill\.md`? points\b/.test(normalized)
