@@ -1,6 +1,8 @@
 # Kibitz
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/kibitzsh.kibitz)](https://marketplace.visualstudio.com/items?itemName=kibitzsh.kibitz)
+[![npm](https://img.shields.io/npm/v/@kibitzsh/kibitz)](https://www.npmjs.com/package/@kibitzsh/kibitz)
 [![Pages](https://github.com/kibitzsh/kibitz/actions/workflows/pages.yml/badge.svg)](https://github.com/kibitzsh/kibitz/actions/workflows/pages.yml)
 [![Website](https://img.shields.io/website?url=https%3A%2F%2Fkibitz.sh)](https://kibitz.sh)
 
