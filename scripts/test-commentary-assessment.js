@@ -75,7 +75,7 @@ function testSecurityAlert(buildCommentaryAssessment, applyAssessmentSignals) {
 
   const text = applyAssessmentSignals('Agent ran one command.', assessment);
   assert(/SECURITY ALERT/i.test(text), 'security alert should be surfaced in final commentary');
-  assert(/Verdict:/i.test(text), 'verdict line should be guaranteed');
+  assert(/on.?track|drifting|blocked|momentum|confidence/i.test(text), 'closing line should be guaranteed');
 }
 
 function main() {
