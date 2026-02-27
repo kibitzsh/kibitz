@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kibitz</title>
+    <meta
+      name="description"
+      content="Kibitz monitors Claude Code and Codex sessions in real time, adds live commentary, and lets you dispatch prompts across sessions."
+    />
+    <style>
+      :root {
+        --bg: #0f172a;
+        --bg2: #1e293b;
+        --card: #111827;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --accent: #22d3ee;
+        --accent2: #38bdf8;
+        --border: rgba(148, 163, 184, 0.25);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "SF Pro Display", "Segoe UI", Inter, Arial, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(1000px 450px at 20% -10%, rgba(34, 211, 238, 0.2), transparent 60%),
+          radial-gradient(900px 450px at 100% 0%, rgba(56, 189, 248, 0.18), transparent 60%),
+          linear-gradient(160deg, var(--bg), var(--bg2));
+        min-height: 100vh;
+      }
+
+      .wrap {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 72px 20px;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(17, 24, 39, 0.9), rgba(2, 6, 23, 0.95));
+        padding: 34px 28px;
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(34px, 6vw, 58px);
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+      }
+
+      .tag {
+        display: inline-block;
+        margin-bottom: 14px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        background: rgba(34, 211, 238, 0.14);
+        border: 1px solid rgba(34, 211, 238, 0.3);
+        color: #a5f3fc;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      p {
+        margin: 18px 0 0;
+        color: var(--muted);
+        font-size: clamp(16px, 2vw, 20px);
+        line-height: 1.55;
+        max-width: 760px;
+      }
+
+      .grid {
+        margin-top: 28px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .item {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 14px;
+        color: #cbd5e1;
+        background: rgba(15, 23, 42, 0.7);
+      }
+
+      .actions {
+        margin-top: 22px;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      a.btn {
+        text-decoration: none;
+        font-weight: 600;
+        border-radius: 11px;
+        padding: 10px 15px;
+        border: 1px solid transparent;
+      }
+
+      a.primary {
+        background: linear-gradient(90deg, var(--accent), var(--accent2));
+        color: #082f49;
+      }
+
+      a.ghost {
+        border-color: var(--border);
+        color: var(--text);
+        background: rgba(30, 41, 59, 0.6);
+      }
+
+      .foot {
+        margin-top: 16px;
+        font-size: 13px;
+        color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="card">
+        <span class="tag">Kibitz</span>
+        <h1>Live commentary and dispatch for AI coding sessions</h1>
+        <p>
+          Kibitz watches active Claude Code and Codex sessions, summarizes what agents are doing in plain language,
+          and lets you route prompts to any active session from one place.
+        </p>
+
+        <div class="grid">
+          <div class="item">Real-time feed from multiple agent sessions.</div>
+          <div class="item">Targeted prompt dispatch to existing sessions or new sessions.</div>
+          <div class="item">VS Code extension + CLI workflow.</div>
+        </div>
+
+        <div class="actions">
+          <a class="btn primary" href="https://github.com/kibitzsh/kibitz">View on GitHub</a>
+          <a class="btn ghost" href="https://github.com/kibitzsh/kibitz#readme">Read docs</a>
+        </div>
+
+        <div class="foot">© Kibitz</div>
+      </section>
+    </main>
+  </body>
+</html>
