@@ -2,18 +2,60 @@ import * as vscode from 'vscode'
 import * as path from 'path'
 import * as fs from 'fs'
 import { CommentaryEngine } from '../core/commentary'
-import { SessionWatcher } from '../core/watcher'
-import { CommentaryEntry, ModelId, MODELS, ProviderStatus } from '../core/types'
+import {
+  CommentaryEntry,
+  DispatchStatus,
+  DispatchTarget,
+  ModelId,
+  MODELS,
+  ProviderStatus,
+  SessionInfo,
+} from '../core/types'
+
+interface PanelHandlers {
+  onDispatchPrompt?: (target: DispatchTarget, prompt: string) => void
+  onSetTarget?: (target: DispatchTarget) => void
+}
+
+type WebviewToExtensionMessage =
+  | { type: 'focus'; value: string }
+  | { type: 'model'; value: ModelId }
+  | { type: 'preset'; value: string }
+  | { type: 'show-event-summary'; value: boolean }
+  | { type: 'pause' }
+  | { type: 'resume' }
+  | { type: 'dispatch-prompt'; value: { target: DispatchTarget; prompt: string } }
+  | { type: 'set-target'; value: DispatchTarget }
+
+type ExtensionToWebviewMessage =
+  | { type: 'history'; value: CommentaryEntry[] }
+  | { type: 'commentary-start'; value: CommentaryEntry }
+  | { type: 'commentary-chunk'; value: string }
+  | { type: 'commentary-done'; value: CommentaryEntry }
+  | { type: 'error'; value: string }
+  | { type: 'sessions'; value: number }
+  | { type: 'model'; value: ModelId }
+  | { type: 'set-focus'; value: string }
+  | { type: 'set-preset'; value: string }
+  | { type: 'set-show-event-summary'; value: boolean }
+  | { type: 'providers'; value: ProviderStatus[] }
+  | { type: 'active-sessions'; value: SessionInfo[] }
+  | { type: 'dispatch-status'; value: DispatchStatus }
+  | { type: 'target-selected'; value: DispatchTarget }
 
 export class KibitzPanel {
   private panel: vscode.WebviewPanel
   private disposed = false
+  private activeSessions: SessionInfo[] = []
+  private selectedTarget: DispatchTarget = { kind: 'new-codex' }
+  private showEventSummary = false
 
   constructor(
     private context: vscode.ExtensionContext,
     private engine: CommentaryEngine,
-    private watcher: SessionWatcher,
     private providers: ProviderStatus[],
+    private extensionVersion: string,
+    private handlers: PanelHandlers = {},
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'kibitz',
@@ -24,16 +66,51 @@ export class KibitzPanel {
 
     this.panel.webview.html = this.getHtml()
 
-    this.panel.webview.onDidReceiveMessage((msg) => {
+    this.panel.webview.onDidReceiveMessage((msg: WebviewToExtensionMessage) => {
       if (msg.type === 'focus') {
         this.engine.setFocus(msg.value)
         this.context.globalState.update('kibitz.focus', msg.value)
-      } else if (msg.type === 'model') {
-        this.engine.setModel(msg.value as ModelId)
-      } else if (msg.type === 'pause') {
+        return
+      }
+
+      if (msg.type === 'model') {
+        this.engine.setModel(msg.value)
+        return
+      }
+
+      if (msg.type === 'preset') {
+        this.engine.setPreset(msg.value)
+        return
+      }
+
+      if (msg.type === 'show-event-summary') {
+        this.showEventSummary = !!msg.value
+        this.context.globalState.update('kibitz.showEventSummary', this.showEventSummary)
+        this.postMessage({ type: 'set-show-event-summary', value: this.showEventSummary })
+        return
+      }
+
+      if (msg.type === 'pause') {
         this.engine.pause()
-      } else if (msg.type === 'resume') {
+        return
+      }
+
+      if (msg.type === 'resume') {
         this.engine.resume()
+        return
+      }
+
+      if (msg.type === 'set-target') {
+        this.selectedTarget = msg.value
+        this.handlers.onSetTarget?.(msg.value)
+        return
+      }
+
+      if (msg.type === 'dispatch-prompt') {
+        const target = msg.value?.target
+        const prompt = String(msg.value?.prompt || '')
+        if (!target || !prompt.trim()) return
+        this.handlers.onDispatchPrompt?.(target, prompt)
       }
     })
 
@@ -41,18 +118,21 @@ export class KibitzPanel {
       this.disposed = true
     })
 
-    // Restore saved focus
     const savedFocus = this.context.globalState.get<string>('kibitz.focus', '')
     if (savedFocus) {
       this.engine.setFocus(savedFocus)
-      this.panel.webview.postMessage({ type: 'set-focus', value: savedFocus })
+      this.postMessage({ type: 'set-focus', value: savedFocus })
     }
 
-    // Send initial state
-    const sessions = this.watcher.getActiveSessions()
-    this.panel.webview.postMessage({ type: 'sessions', value: sessions.length })
-    this.panel.webview.postMessage({ type: 'model', value: this.engine.getModel() })
-    this.panel.webview.postMessage({ type: 'providers', value: this.providers })
+    this.showEventSummary = this.context.globalState.get<boolean>('kibitz.showEventSummary', false)
+
+    this.postMessage({ type: 'sessions', value: 0 })
+    this.postMessage({ type: 'model', value: this.engine.getModel() })
+    this.postMessage({ type: 'set-preset', value: this.engine.getPreset() })
+    this.postMessage({ type: 'set-show-event-summary', value: this.showEventSummary })
+    this.postMessage({ type: 'providers', value: this.providers })
+    this.postMessage({ type: 'active-sessions', value: [] })
+    this.postMessage({ type: 'target-selected', value: this.selectedTarget })
   }
 
   reveal(): void {
@@ -60,34 +140,66 @@ export class KibitzPanel {
   }
 
   isVisible(): boolean {
-    return !this.disposed && this.panel.visible
+    return !this.disposed
   }
 
-  addCommentary(entry: CommentaryEntry, streaming: boolean): void {
+  addCommentary(entry: CommentaryEntry): void {
     if (this.disposed) return
-    this.panel.webview.postMessage({ type: 'commentary-start', value: entry })
+    this.postMessage({ type: 'commentary-start', value: entry })
   }
 
   appendChunk(chunk: string): void {
     if (this.disposed) return
-    this.panel.webview.postMessage({ type: 'commentary-chunk', value: chunk })
+    this.postMessage({ type: 'commentary-chunk', value: chunk })
   }
 
   finishCommentary(entry: CommentaryEntry): void {
     if (this.disposed) return
-    this.panel.webview.postMessage({ type: 'commentary-done', value: entry })
-    const sessions = this.watcher.getActiveSessions()
-    this.panel.webview.postMessage({ type: 'sessions', value: sessions.length })
+    this.postMessage({ type: 'commentary-done', value: entry })
   }
 
   showError(msg: string): void {
     if (this.disposed) return
-    this.panel.webview.postMessage({ type: 'error', value: msg })
+    this.postMessage({ type: 'error', value: msg })
   }
 
   updateModel(model: ModelId): void {
     if (this.disposed) return
-    this.panel.webview.postMessage({ type: 'model', value: model })
+    this.postMessage({ type: 'model', value: model })
+  }
+
+  updatePreset(preset: string): void {
+    if (this.disposed) return
+    this.postMessage({ type: 'set-preset', value: preset })
+  }
+
+  updateProviders(providers: ProviderStatus[]): void {
+    if (this.disposed) return
+    this.providers = providers
+    this.postMessage({ type: 'providers', value: providers })
+  }
+
+  updateActiveSessions(sessions: SessionInfo[]): void {
+    if (this.disposed) return
+    this.activeSessions = sessions.slice()
+    this.postMessage({ type: 'active-sessions', value: this.activeSessions })
+    this.postMessage({ type: 'sessions', value: this.activeSessions.length })
+  }
+
+  setHistory(entries: CommentaryEntry[]): void {
+    if (this.disposed) return
+    this.postMessage({ type: 'history', value: entries.slice() })
+  }
+
+  setTarget(target: DispatchTarget): void {
+    this.selectedTarget = target
+    if (this.disposed) return
+    this.postMessage({ type: 'target-selected', value: target })
+  }
+
+  postDispatchStatus(status: DispatchStatus): void {
+    if (this.disposed) return
+    this.postMessage({ type: 'dispatch-status', value: status })
   }
 
   dispose(): void {
@@ -95,220 +207,447 @@ export class KibitzPanel {
     this.disposed = true
   }
 
+  private postMessage(message: ExtensionToWebviewMessage): void {
+    this.panel.webview.postMessage(message)
+  }
+
   private getHtml(): string {
     const mediaPath = path.join(this.context.extensionPath, 'media', 'panel.html')
     if (fs.existsSync(mediaPath)) {
       return fs.readFileSync(mediaPath, 'utf8')
     }
-    return getInlineHtml(this.providers)
+    return getInlineHtml(this.providers, this.extensionVersion, this.engine.getModel(), this.engine.getPreset())
   }
 }
 
-function getInlineHtml(providers: ProviderStatus[]): string {
-  // Only show models whose provider is available
-  const availableProviders = new Set(providers.filter(p => p.available).map(p => p.provider))
-  const availableModels = MODELS.filter(m => availableProviders.has(m.provider))
-  const modelOptions = availableModels.map(
-    m => `<option value="${m.id}">${m.label}</option>`,
-  ).join('\n')
+export function getInlineHtml(
+  providers: ProviderStatus[],
+  extensionVersion: string,
+  initialModel: ModelId,
+  initialPreset: string,
+): string {
+  const availableProviders = new Set(providers.filter((provider) => provider.available).map((provider) => provider.provider))
+  const availableModels = MODELS.filter((model) => availableProviders.has(model.provider))
+  const fallbackModel = availableModels[0]?.id || initialModel
 
-  // Provider status badges HTML
-  const providerBadges = providers.map(p => {
-    const dot = p.available ? '●' : '○'
-    const color = p.available ? '#22c55e' : '#6b7280'
-    const title = p.available ? `${p.label} CLI v${p.version}` : `${p.label} CLI not found`
-    return `<span class="provider-badge" title="${title}" style="color: ${color}">${dot} ${p.label}</span>`
+  const modelOptionsHtml = availableModels.map((model) => {
+    const selected = model.id === initialModel ? ' selected' : ''
+    return `<option value="${model.id}"${selected}>${escapeHtml(model.label)}</option>`
   }).join('\n')
+
+  const modelData = JSON.stringify(
+    availableModels.map((model) => ({ id: model.id, label: model.label, provider: model.provider })),
+  ).replace(/</g, '\\u003c')
+
+  const templateOptionsHtml = [
+    { value: 'auto', label: 'Template: Auto' },
+    { value: 'critical-coder', label: 'Very Critical Coder' },
+    { value: 'precise-short', label: 'Precise + Short' },
+    { value: 'emotional', label: 'Emotional' },
+    { value: 'newbie', label: 'For Newbies' },
+  ].map((item) => {
+    const selected = item.value === initialPreset ? ' selected' : ''
+    return `<option value="${item.value}"${selected}>${escapeHtml(item.label)}</option>`
+  }).join('\n')
+
+  const providerBadges = providers.map((provider) => {
+    const dot = provider.available ? '●' : '○'
+    const color = provider.available ? '#22c55e' : '#6b7280'
+    const title = provider.available
+      ? `${provider.label} CLI ${provider.version || ''}`.trim()
+      : `${provider.label} CLI not found`
+    return `<span class="provider-badge" style="color:${color}" title="${escapeHtml(title)}">${dot} ${escapeHtml(provider.label)}</span>`
+  }).join('\n')
+
+  const safeVersion = extensionVersion.replace(/[^0-9a-zA-Z._-]/g, '') || 'dev'
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
   :root {
     --bg: var(--vscode-editor-background);
     --fg: var(--vscode-editor-foreground);
-    --border: var(--vscode-panel-border, #444);
+    --border: var(--vscode-panel-border, #3f3f46);
     --input-bg: var(--vscode-input-background);
     --input-fg: var(--vscode-input-foreground);
-    --input-border: var(--vscode-input-border, #444);
-    --badge-claude: #d97706;
-    --badge-codex: #059669;
+    --input-border: var(--vscode-input-border, #52525b);
+    --codex-accent: rgba(16, 185, 129, 0.42);
+    --claude-accent: rgba(249, 115, 22, 0.45);
     --badge-vscode: #6366f1;
-    --badge-cli: #8b5cf6;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: var(--vscode-font-family, monospace);
-    font-size: var(--vscode-font-size, 13px);
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
     background: var(--bg);
     color: var(--fg);
+    font-family: var(--vscode-font-family, monospace);
+    font-size: var(--vscode-font-size, 13px);
+  }
+  body {
     display: flex;
     flex-direction: column;
-    height: 100vh;
     overflow: hidden;
   }
   .header {
     display: flex;
-    align-items: center;
     gap: 8px;
+    align-items: center;
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
     flex-wrap: wrap;
   }
   .header h1 {
-    font-size: 14px;
-    font-weight: 600;
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
     letter-spacing: 1px;
   }
   .badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 6px;
+    padding: 2px 7px;
     font-size: 11px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-weight: 500;
+    font-weight: 600;
   }
-  .badge-sessions { background: var(--badge-vscode); color: white; }
-  .badge-model { background: #374151; color: #d1d5db; border: 1px solid #4b5563; }
+  .badge-version {
+    color: #cbd5e1;
+    background: #1f2937;
+    border: 1px solid #334155;
+  }
+  .badge-sessions {
+    color: white;
+    background: var(--badge-vscode);
+  }
   .provider-badge {
-    font-size: 11px;
-    font-weight: 500;
-    cursor: default;
+    font-size: 12px;
+    font-weight: 600;
   }
   .controls {
-    display: flex;
-    gap: 6px;
     margin-left: auto;
+    display: flex;
     align-items: center;
+    gap: 6px;
   }
-  .controls select, .controls button {
-    font-size: 11px;
-    padding: 3px 6px;
+  .controls select,
+  .controls button {
     background: var(--input-bg);
     color: var(--input-fg);
     border: 1px solid var(--input-border);
-    border-radius: 3px;
+    border-radius: 6px;
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+  .controls button {
+    min-width: 32px;
     cursor: pointer;
   }
   .feed {
     flex: 1;
     overflow-y: auto;
-    padding: 8px 12px;
+    padding: 10px 12px;
   }
   .entry {
     margin-bottom: 12px;
-    padding: 8px;
-    border-left: 3px solid var(--border);
-    animation: fadeIn 0.3s;
+    padding: 8px 10px;
+    border-left: 2px solid rgba(99, 102, 241, 0.2);
+    cursor: pointer;
   }
-  .entry.claude { border-left-color: var(--badge-claude); }
-  .entry.codex { border-left-color: var(--badge-codex); }
+  .entry.codex { border-left-color: rgba(16, 185, 129, 0.55); }
+  .entry.claude { border-left-color: rgba(249, 115, 22, 0.55); }
+  .entry.selected-target {
+    outline: none;
+    border-left-width: 3px;
+    border-left-color: rgba(99, 102, 241, 0.75);
+  }
+  .entry:hover { background: transparent; }
   .entry-header {
     display: flex;
-    gap: 6px;
     align-items: center;
-    margin-bottom: 4px;
-    font-size: 11px;
-    opacity: 0.7;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+    font-size: 12px;
+    opacity: 0.82;
   }
-  .entry-header .agent-badge {
-    padding: 1px 4px;
-    border-radius: 2px;
-    font-weight: 600;
-    font-size: 10px;
+  .agent-badge {
     text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: #fff;
   }
-  .agent-badge.claude { background: var(--badge-claude); color: white; }
-  .agent-badge.codex { background: var(--badge-codex); color: white; }
-  .source-badge { font-size: 10px; opacity: 0.6; }
-  .event-summary {
+  .agent-badge.codex { background: #10b981; }
+  .agent-badge.claude { background: #f97316; }
+  .source-badge { opacity: 0.7; }
+  .session-line {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+    opacity: 0.85;
     font-size: 11px;
-    opacity: 0.6;
-    margin-bottom: 4px;
+    overflow: hidden;
+  }
+  .project-name,
+  .session-name {
+    font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: min(42vw, 420px);
+  }
+  .session-divider {
+    opacity: 0.55;
+    font-size: 10px;
+  }
+  .event-summary {
+    display: none;
+  }
+  .show-event-summary .event-summary {
+    margin-bottom: 5px;
+    font-size: 11px;
+    opacity: 0.64;
     font-style: italic;
+    display: block;
   }
   .commentary {
     font-size: 13px;
-    line-height: 1.6;
-  }
-  .session-name {
-    color: #555;
-    font-size: 11px;
-    font-family: monospace;
+    line-height: 1.55;
   }
   .commentary strong { font-weight: 700; }
-  .commentary ul {
-    margin: 2px 0;
-    padding-left: 16px;
-  }
-  .commentary li {
-    margin-bottom: 2px;
+  .commentary code {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-size: 12px;
   }
   .commentary p {
     margin: 2px 0;
   }
-  .error-entry {
-    color: #ef4444;
-    padding: 6px 8px;
-    font-size: 12px;
-    opacity: 0.8;
+  .commentary ul {
+    margin: 2px 0;
+    padding-left: 17px;
   }
-  .input-area {
-    padding: 8px 12px;
-    border-top: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .input-area input {
+  .commentary li { margin-bottom: 2px; }
+  .commentary table {
     width: 100%;
-    padding: 6px 8px;
-    background: var(--input-bg);
-    color: var(--input-fg);
-    border: 1px solid var(--input-border);
-    border-radius: 4px;
+    border-collapse: collapse;
+    margin: 4px 0 6px;
     font-size: 12px;
-    outline: none;
   }
-  .input-area input:focus {
-    border-color: var(--vscode-focusBorder, #007fd4);
+  .commentary th,
+  .commentary td {
+    border: 1px solid var(--border);
+    padding: 3px 5px;
+    text-align: left;
+    vertical-align: top;
   }
-  .cursor { animation: blink 0.8s infinite; }
-  @keyframes blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .commentary th {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .error-entry,
+  .system-entry {
+    padding: 7px 9px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+  .error-entry {
+    color: #fecaca;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+  }
+  .system-entry {
+    color: var(--fg);
+    opacity: 0.84;
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.22);
+  }
   .empty-state {
+    height: 100%;
     display: flex;
     flex-direction: column;
-    align-items: center;
     justify-content: center;
-    height: 100%;
-    opacity: 0.5;
+    align-items: center;
     text-align: center;
-    padding: 40px;
+    opacity: 0.48;
+    padding: 24px;
   }
-  .empty-state h2 { font-size: 16px; margin-bottom: 8px; }
-  .empty-state p { font-size: 12px; max-width: 300px; }
+  .empty-state h2 {
+    margin: 0 0 8px;
+    font-size: 17px;
+  }
+  .empty-state p {
+    margin: 0;
+    font-size: 12px;
+    max-width: 360px;
+  }
+  .composer {
+    border-top: 1px solid var(--border);
+    padding: 8px 12px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .composer-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .target-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .target-badge {
+    max-width: min(46vw, 440px);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--fg);
+    border: 1px solid var(--input-border);
+    border-radius: 999px;
+    font-size: 11px;
+    padding: 4px 9px;
+    cursor: pointer;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+  .target-badge:hover {
+    border-color: var(--vscode-focusBorder, #0ea5e9);
+  }
+  .target-badge.selected {
+    background: rgba(99, 102, 241, 0.28);
+    border-color: rgba(99, 102, 241, 0.95);
+  }
+  .composer-input {
+    width: 100%;
+    min-height: 36px;
+    max-height: 140px;
+    resize: vertical;
+    border-radius: 6px;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--input-fg);
+    font-size: 12px;
+    padding: 7px 9px;
+    line-height: 1.4;
+    outline: none;
+  }
+  .composer-input:focus,
+  .target-badge:focus {
+    border-color: var(--vscode-focusBorder, #0ea5e9);
+  }
+  .send-btn {
+    width: 34px;
+    min-width: 34px;
+    border-radius: 6px;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--fg);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .send-btn:hover {
+    border-color: var(--vscode-focusBorder, #0ea5e9);
+  }
+  .composer-help {
+    font-size: 11px;
+    opacity: 0.65;
+  }
+  .slash-menu {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 84px;
+    z-index: 8;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 7px;
+    box-shadow: 0 7px 20px rgba(0, 0, 0, 0.35);
+  }
+  .slash-menu.hidden { display: none; }
+  .slash-item {
+    border-bottom: 1px solid var(--border);
+    padding: 7px 9px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .slash-item:last-child { border-bottom: none; }
+  .slash-item:hover,
+  .slash-item.selected {
+    background: rgba(99, 102, 241, 0.22);
+  }
+  .slash-item-main {
+    color: #c7d2fe;
+    font-family: monospace;
+    white-space: nowrap;
+  }
+  .slash-item-desc {
+    opacity: 0.74;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cursor {
+    animation: blink 0.8s infinite;
+  }
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
 </style>
 </head>
 <body>
   <div class="header">
     <h1>KIBITZ</h1>
+    <span class="badge badge-version">v${safeVersion}</span>
     ${providerBadges}
     <span class="badge badge-sessions" id="sessions">0 sessions</span>
+
     <div class="controls">
-      <select id="model-select">
-        ${modelOptions}
-      </select>
-      <button id="pause-btn">Pause</button>
+      <select id="model-select">${modelOptionsHtml}</select>
+      <select id="preset-select">${templateOptionsHtml}</select>
+      <button id="pause-btn" title="Pause commentary" aria-label="Pause commentary">⏸</button>
     </div>
   </div>
-  <div class="feed" id="feed">
-    <div class="empty-state" id="empty">
+
+  <div id="feed" class="feed">
+    <div id="empty" class="empty-state">
       <h2>Waiting for action...</h2>
       <p>Start a Claude Code or Codex session and Kibitz will provide live commentary.</p>
     </div>
   </div>
-  <div class="input-area">
-    <input type="text" id="focus-input" placeholder='Focus: e.g., "roast everything", "focus on security", "be a pirate"' />
+
+  <div class="composer">
+    <div id="slash-menu" class="slash-menu hidden"></div>
+    <div id="target-badges" class="target-badges"></div>
+    <div class="composer-row">
+      <textarea
+        id="composer-input"
+        class="composer-input"
+        placeholder="Send prompt to selected session (Enter=send, Shift+Enter=newline, / for commands)"
+      ></textarea>
+      <button id="composer-send" class="send-btn" title="Send" aria-label="Send">➤</button>
+    </div>
+    <div class="composer-help">Targets: click a badge or type <code>/1</code>. <code>/1</code> selects and keeps <code>/1 </code> in input. <code>/1 fix bug</code> sends to 1. (Also works: <code>fix bug 1</code>.)</div>
   </div>
 
 <script>
@@ -317,30 +656,141 @@ function getInlineHtml(providers: ProviderStatus[]): string {
   const empty = document.getElementById('empty');
   const sessionsEl = document.getElementById('sessions');
   const modelSelect = document.getElementById('model-select');
+  const presetSelect = document.getElementById('preset-select');
   const pauseBtn = document.getElementById('pause-btn');
-  const focusInput = document.getElementById('focus-input');
+  const targetBadges = document.getElementById('target-badges');
+  const composerInput = document.getElementById('composer-input');
+  const composerSend = document.getElementById('composer-send');
+  const slashMenu = document.getElementById('slash-menu');
+
+  const ALL_MODEL_OPTIONS = ${modelData};
+  const FALLBACK_MODEL_ID = ${JSON.stringify(fallbackModel)};
+  const MODEL_PROVIDER = Object.fromEntries(ALL_MODEL_OPTIONS.map((opt) => [opt.id, opt.provider]));
+  const PROVIDER_AGENT = { anthropic: 'claude', openai: 'codex' };
+
+  const SLASH_COMMANDS = [
+    { name: 'help', usage: '/help', insert: '/help', takesArg: false, description: 'Show all slash commands' },
+    { name: 'pause', usage: '/pause', insert: '/pause', takesArg: false, description: 'Pause commentary stream' },
+    { name: 'resume', usage: '/resume', insert: '/resume', takesArg: false, description: 'Resume commentary stream' },
+    { name: 'clear', usage: '/clear', insert: '/clear', takesArg: false, description: 'Clear feed messages' },
+    { name: 'focus', usage: '/focus <text>', insert: '/focus ', takesArg: true, description: 'Set focus guidance text' },
+    { name: 'model', usage: '/model <id-or-label>', insert: '/model ', takesArg: true, description: 'Switch model' },
+    { name: 'preset', usage: '/preset <id-or-label>', insert: '/preset ', takesArg: true, description: 'Switch template preset' },
+    { name: 'summary', usage: '/summary <on|off>', insert: '/summary ', takesArg: true, description: 'Show or hide event summary line' },
+  ];
+
+  let paused = false;
+  let autoScroll = true;
+  let activeSessions = [];
+  let selectedTarget = { kind: 'new-codex' };
+  let slashItems = [];
+  let slashSelectedIndex = 0;
+  let showEventSummary = false;
+
   let currentEntry = null;
   let currentRawText = '';
-  let autoScroll = true;
-  let paused = false;
+  let pendingTypingText = '';
+  let finalCommentaryText = '';
+  let streamDone = false;
+  let typingTimer = null;
+  const TYPING_INTERVAL_MS = 18;
+  const TYPING_CHARS_PER_TICK = 2;
 
-  feed.addEventListener('scroll', () => {
-    const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
-    autoScroll = atBottom;
-  });
+  function sessionKey(agent, sessionId) {
+    return String(agent || '').toLowerCase() + ':' + String(sessionId || '').trim().toLowerCase();
+  }
 
-  function scrollToBottom() {
-    if (autoScroll) feed.scrollTop = feed.scrollHeight;
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function timeStr(ts) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function looksLikeSessionCode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return true;
+    if (/^[0-9a-f]{8}$/.test(normalized)) return true;
+    if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(normalized)) return true;
+    if (/^session[\\s:_-]*[0-9a-f]{8,}$/.test(normalized)) return true;
+    if (/^turn[\\s:_-]*[0-9a-f]{8,}$/.test(normalized)) return true;
+    if (/^rollout-\\d{4}-\\d{2}-\\d{2}t\\d{2}[-:]\\d{2}[-:]\\d{2}[-a-z0-9]+(?:\\.jsonl)?$/.test(normalized)) return true;
+    return false;
+  }
+
+  function normalizeLabel(value) {
+    return String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function sameLabel(a, b) {
+    const left = normalizeLabel(a);
+    const right = normalizeLabel(b);
+    return Boolean(left && right && left === right);
+  }
+
+  function truncateLabel(value, max) {
+    const text = String(value || '').replace(/\\s+/g, ' ').trim();
+    if (!text) return '';
+    if (text.length <= max) return text;
+    if (max <= 1) return text.slice(0, max);
+    if (max <= 3) return text.slice(0, max);
+    return text.slice(0, max - 3).trimEnd() + '...';
+  }
+
+  function canonicalSession(entry) {
+    const key = sessionKey(entry.agent, entry.sessionId);
+    return activeSessions.find((session) => sessionKey(session.agent, session.id) === key) || null;
+  }
+
+  function displaySessionName(entry) {
+    const canonical = canonicalSession(entry);
+    const canonicalTitle = String((canonical && canonical.sessionTitle) || '').trim();
+    const entryTitle = String(entry.sessionTitle || '').trim();
+    const project = String((canonical && canonical.projectName) || entry.projectName || '').trim();
+
+    if (canonicalTitle && !looksLikeSessionCode(canonicalTitle) && !sameLabel(canonicalTitle, project)) {
+      return truncateLabel(canonicalTitle, 52);
+    }
+    if (entryTitle && !looksLikeSessionCode(entryTitle) && !sameLabel(entryTitle, project)) {
+      return truncateLabel(entryTitle, 52);
+    }
+    if (canonicalTitle && !looksLikeSessionCode(canonicalTitle)) return truncateLabel(canonicalTitle, 52);
+    if (entryTitle && !looksLikeSessionCode(entryTitle)) return truncateLabel(entryTitle, 52);
+    if (project && !looksLikeSessionCode(project)) return truncateLabel(project, 36);
+    return String(entry.agent || 'session') + ' session';
+  }
+
+  function displayProjectName(entry) {
+    const canonical = canonicalSession(entry);
+    const project = String((canonical && canonical.projectName) || entry.projectName || '').trim();
+    if (project && !looksLikeSessionCode(project)) return project;
+    return '';
   }
 
   function renderCommentary(text) {
-    // Split into lines, group bullets into <ul>, wrap rest in <p>
-    const lines = text.split('\\n');
+    const lines = String(text || '').split('\\n');
     let html = '';
     let inList = false;
-    for (const line of lines) {
-      const trimmed = line.trim();
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
       if (!trimmed) continue;
+
+      const table = renderTableIfPresent(lines, i);
+      if (table) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += table.html;
+        i = table.nextIndex;
+        continue;
+      }
+
       const bullet = trimmed.match(/^[-*]\\s+(.*)/);
       if (bullet) {
         if (!inList) { html += '<ul>'; inList = true; }
@@ -350,117 +800,955 @@ function getInlineHtml(providers: ProviderStatus[]): string {
         html += '<p>' + fmt(trimmed) + '</p>';
       }
     }
+
     if (inList) html += '</ul>';
     return html;
   }
 
-  function fmt(s) {
-    return s
+  function fmt(text) {
+    return escapeHtml(String(text || ''))
       .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
-      .replace(/\`([^\`]+)\`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 4px;border-radius:2px;font-size:12px">$1</code>');
+      .replace(/\\u0060([^\\u0060]+)\\u0060/g, '<code>$1</code>');
   }
 
-  function timeStr(ts) {
-    const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  function splitTableRow(line) {
+    return line
+      .trim()
+      .replace(/^\\|/, '')
+      .replace(/\\|$/, '')
+      .split('|')
+      .map((part) => part.trim());
+  }
+
+  function isTableSeparator(line) {
+    if (!line.includes('|')) return false;
+    const cells = splitTableRow(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+  }
+
+  function renderTableIfPresent(lines, index) {
+    if (index + 1 >= lines.length) return null;
+    const headerLine = lines[index].trim();
+    const separatorLine = lines[index + 1].trim();
+    if (!headerLine.includes('|') || !isTableSeparator(separatorLine)) return null;
+
+    const headers = splitTableRow(headerLine);
+    if (headers.length === 0) return null;
+
+    let rows = '';
+    let rowCount = 0;
+    let i = index + 2;
+    for (; i < lines.length; i++) {
+      const rowLine = lines[i].trim();
+      if (!rowLine || !rowLine.includes('|')) break;
+      const cells = splitTableRow(rowLine);
+      if (cells.length === 0) break;
+      rows += '<tr>' + headers.map((_, col) => '<td>' + fmt(cells[col] || '') + '</td>').join('') + '</tr>';
+      rowCount++;
+    }
+
+    if (rowCount === 0) return null;
+    const headHtml = headers.map((head) => '<th>' + fmt(head) + '</th>').join('');
+    return {
+      html: '<table><thead><tr>' + headHtml + '</tr></thead><tbody>' + rows + '</tbody></table>',
+      nextIndex: i - 1,
+    };
+  }
+
+  function pushSystemEntry(message, isError) {
+    const div = document.createElement('div');
+    div.className = isError ? 'error-entry' : 'system-entry';
+    div.textContent = String(message || '');
+    feed.appendChild(div);
+    empty.style.display = 'none';
+    scrollToBottom();
+  }
+
+  function renderStaticEntry(entry) {
+    const safeAgent = entry.agent === 'claude' ? 'claude' : 'codex';
+    const safeSource = escapeHtml(entry.source || 'cli');
+    const rawProjectName = displayProjectName(entry);
+    const rawSessionName = displaySessionName(entry);
+    const projectName = escapeHtml(rawProjectName);
+    const sessionName = sameLabel(rawProjectName, rawSessionName) ? '' : escapeHtml(rawSessionName);
+    const eventSummary = escapeHtml(truncateLabel(entry.eventSummary || '', 160));
+
+    const sessionLineHtml = (projectName || sessionName)
+      ? ('<div class="session-line">'
+        + (projectName ? '<span class="project-name">' + projectName + '</span>' : '')
+        + ((projectName && sessionName) ? '<span class="session-divider">›</span>' : '')
+        + (sessionName ? '<span class="session-name">' + sessionName + '</span>' : '')
+        + '</div>')
+      : '';
+
+    const div = document.createElement('div');
+    div.className = 'entry ' + safeAgent;
+    div.setAttribute('data-agent', safeAgent);
+    div.setAttribute('data-session', String(entry.sessionId || '').trim().toLowerCase());
+    div.innerHTML = ''
+      + '<div class="entry-header">'
+      + '  <span class="agent-badge ' + safeAgent + '">' + safeAgent + '</span>'
+      + '  <span class="source-badge">[' + safeSource + ']</span>'
+      + '  <span>' + escapeHtml(timeStr(entry.timestamp || Date.now())) + '</span>'
+      +    sessionLineHtml
+      + '</div>'
+      + '<div class="event-summary">' + eventSummary + '</div>'
+      + '<div class="commentary">' + renderCommentary(entry.commentary || '') + '</div>';
+    feed.appendChild(div);
+  }
+
+  function clearFeed() {
+    if (typingTimer) {
+      clearInterval(typingTimer);
+      typingTimer = null;
+    }
+    currentEntry = null;
+    currentRawText = '';
+    pendingTypingText = '';
+    finalCommentaryText = '';
+    streamDone = false;
+    feed.innerHTML = '';
+    feed.appendChild(empty);
+    empty.style.display = 'flex';
+  }
+
+  function renderCurrentCommentary(withCursor) {
+    const node = document.getElementById('current-commentary');
+    if (!node) return;
+    const body = renderCommentary(currentRawText);
+    node.innerHTML = withCursor ? body + '<span class="cursor">|</span>' : body;
+  }
+
+  function finalizeCurrentCommentary() {
+    if (typingTimer) {
+      clearInterval(typingTimer);
+      typingTimer = null;
+    }
+
+    const node = document.getElementById('current-commentary');
+    if (node) {
+      const finalText = finalCommentaryText || currentRawText;
+      node.innerHTML = renderCommentary(finalText);
+      node.removeAttribute('id');
+    }
+
+    currentEntry = null;
+    currentRawText = '';
+    pendingTypingText = '';
+    finalCommentaryText = '';
+    streamDone = false;
+    scrollToBottom();
+  }
+
+  function ensureTypingLoop() {
+    if (typingTimer) return;
+    typingTimer = setInterval(() => {
+      if (!currentEntry) {
+        clearInterval(typingTimer);
+        typingTimer = null;
+        return;
+      }
+
+      if (!pendingTypingText) {
+        if (streamDone) finalizeCurrentCommentary();
+        return;
+      }
+
+      const take = Math.min(TYPING_CHARS_PER_TICK, pendingTypingText.length);
+      currentRawText += pendingTypingText.slice(0, take);
+      pendingTypingText = pendingTypingText.slice(take);
+      renderCurrentCommentary(true);
+      scrollToBottom();
+    }, TYPING_INTERVAL_MS);
+  }
+
+  function scrollToBottom() {
+    if (autoScroll) {
+      feed.scrollTop = feed.scrollHeight;
+    }
+  }
+
+  feed.addEventListener('scroll', () => {
+    autoScroll = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+  });
+
+  function normalizeChoice(value) {
+    return String(value || '')
+      .toLowerCase()
+      .trim()
+      .replace(/^template:\\s*/, '')
+      .replace(/\\s+/g, ' ');
+  }
+
+  function resolveSelectOption(selectEl, rawArg) {
+    const needle = normalizeChoice(rawArg);
+    if (!needle) return null;
+    const options = Array.from(selectEl.options).map((option) => ({
+      value: option.value,
+      label: option.textContent || option.value,
+    }));
+
+    const exact = options.find((option) => {
+      return normalizeChoice(option.value) === needle || normalizeChoice(option.label) === needle;
+    });
+    if (exact) return exact;
+
+    return options.find((option) => {
+      return normalizeChoice(option.value).includes(needle) || normalizeChoice(option.label).includes(needle);
+    }) || null;
+  }
+
+  function parseSlashInput(rawValue) {
+    const raw = String(rawValue || '').trim();
+    if (!raw.startsWith('/')) return null;
+    const body = raw.slice(1);
+    const firstSpace = body.indexOf(' ');
+    if (firstSpace === -1) {
+      return { command: body.toLowerCase(), args: '' };
+    }
+    return {
+      command: body.slice(0, firstSpace).toLowerCase(),
+      args: body.slice(firstSpace + 1).trim(),
+    };
+  }
+
+  function targetByNumericIndex(index) {
+    const idx = Number(index) - 1;
+    if (!Number.isFinite(idx) || idx < 0 || idx >= currentBadgeTargets.length) return null;
+    return currentBadgeTargets[idx].target;
+  }
+
+  function parseNumericTargetInput(rawValue) {
+    const raw = String(rawValue || '');
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    const onlyNumber = trimmed.match(/^(\\d{1,2})$/);
+    if (onlyNumber) {
+      const index = Number(onlyNumber[1]);
+      const target = targetByNumericIndex(index);
+      if (!target) return null;
+      return { mode: 'select-only', index, target, prompt: '' };
+    }
+
+    const numberFirst = trimmed.match(/^(\\d{1,2})\\s+([\\s\\S]+)$/);
+    if (numberFirst) {
+      const index = Number(numberFirst[1]);
+      const target = targetByNumericIndex(index);
+      const prompt = String(numberFirst[2] || '').trim();
+      if (!target || !prompt) return null;
+      return { mode: 'send', index, target, prompt };
+    }
+
+    const numberLast = trimmed.match(/^([\\s\\S]+?)\\s+(\\d{1,2})$/);
+    if (numberLast) {
+      const index = Number(numberLast[2]);
+      const target = targetByNumericIndex(index);
+      const prompt = String(numberLast[1] || '').trim();
+      if (!target || !prompt) return null;
+      return { mode: 'send', index, target, prompt };
+    }
+
+    return null;
+  }
+
+  function parseNumericSlashTargetInput(rawValue) {
+    const trimmed = String(rawValue || '').trim();
+    const match = trimmed.match(/^\\/(\\d{1,2})(?:\\s+([\\s\\S]+))?$/);
+    if (!match) return null;
+
+    const index = Number(match[1]);
+    const target = targetByNumericIndex(index);
+    if (!target) return null;
+
+    const prompt = String(match[2] || '').trim();
+    if (!prompt) return { mode: 'select-only', index, target, prompt: '' };
+    return { mode: 'send', index, target, prompt };
+  }
+
+  function findSlashCommand(name) {
+    return SLASH_COMMANDS.find((cmd) => cmd.name === String(name || '').toLowerCase());
+  }
+
+  function hideSlashMenu() {
+    slashItems = [];
+    slashSelectedIndex = 0;
+    slashMenu.classList.add('hidden');
+    slashMenu.innerHTML = '';
+  }
+
+  function updateSlashMenu() {
+    const parsed = parseSlashInput(composerInput.value);
+    if (!parsed) {
+      hideSlashMenu();
+      return;
+    }
+
+    const query = parsed.command || '';
+    slashItems = SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(query));
+    if (slashItems.length === 0) {
+      hideSlashMenu();
+      return;
+    }
+
+    if (slashSelectedIndex >= slashItems.length) {
+      slashSelectedIndex = 0;
+    }
+
+    slashMenu.innerHTML = slashItems.map((cmd, index) => {
+      const selected = index === slashSelectedIndex ? ' selected' : '';
+      return (
+        '<div class="slash-item' + selected + '" data-index="' + index + '">' +
+          '<span class="slash-item-main">' + escapeHtml(cmd.usage) + '</span>' +
+          '<span class="slash-item-desc">' + escapeHtml(cmd.description) + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    slashMenu.classList.remove('hidden');
+
+    const items = slashMenu.querySelectorAll('.slash-item');
+    items.forEach((item) => {
+      item.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        const idx = Number(item.getAttribute('data-index'));
+        pickSlashCommandFromMenu(Number.isNaN(idx) ? 0 : idx);
+      });
+    });
+  }
+
+  function pickSlashCommandFromMenu(index) {
+    if (index < 0 || index >= slashItems.length) return;
+    const cmd = slashItems[index];
+    composerInput.value = cmd.insert;
+    composerInput.focus();
+    updateSlashMenu();
+  }
+
+  function refreshPauseButton() {
+    const icon = paused ? '▶' : '⏸';
+    const label = paused ? 'Resume commentary' : 'Pause commentary';
+    pauseBtn.textContent = icon;
+    pauseBtn.title = label;
+    pauseBtn.setAttribute('aria-label', label);
+  }
+
+  function setPausedState(nextPaused, notifyExtension) {
+    paused = !!nextPaused;
+    refreshPauseButton();
+    if (notifyExtension) {
+      vscode.postMessage({ type: paused ? 'pause' : 'resume' });
+    }
+  }
+
+  function setEventSummaryVisibility(nextVisible, notifyExtension) {
+    showEventSummary = !!nextVisible;
+    document.body.classList.toggle('show-event-summary', showEventSummary);
+    if (notifyExtension) {
+      vscode.postMessage({ type: 'show-event-summary', value: showEventSummary });
+    }
+  }
+
+  function showSlashHelp() {
+    const commands = SLASH_COMMANDS.map((cmd) => cmd.usage).join(', ');
+    pushSystemEntry('Slash commands: ' + commands, false);
+  }
+
+  function executeSlashCommand(rawInput) {
+    const parsed = parseSlashInput(rawInput);
+    if (!parsed || !parsed.command) return null;
+
+    const cmd = findSlashCommand(parsed.command);
+    if (!cmd) return null;
+
+    if (cmd.takesArg && !parsed.args) {
+      pushSystemEntry('Missing argument for ' + cmd.usage, true);
+      return 'keep';
+    }
+
+    if (cmd.name === 'help') {
+      showSlashHelp();
+      return 'clear';
+    }
+    if (cmd.name === 'pause') {
+      setPausedState(true, true);
+      return 'clear';
+    }
+    if (cmd.name === 'resume') {
+      setPausedState(false, true);
+      return 'clear';
+    }
+    if (cmd.name === 'clear') {
+      clearFeed();
+      return 'clear';
+    }
+    if (cmd.name === 'focus') {
+      vscode.postMessage({ type: 'focus', value: parsed.args });
+      pushSystemEntry('Focus updated', false);
+      return 'clear';
+    }
+    if (cmd.name === 'model') {
+      const option = resolveSelectOption(modelSelect, parsed.args);
+      if (!option) {
+        pushSystemEntry('Unknown model: ' + parsed.args, true);
+        return 'keep';
+      }
+      modelSelect.value = option.value;
+      vscode.postMessage({ type: 'model', value: option.value });
+      pushSystemEntry('Model set to ' + option.label, false);
+      return 'clear';
+    }
+    if (cmd.name === 'preset') {
+      const option = resolveSelectOption(presetSelect, parsed.args);
+      if (!option) {
+        pushSystemEntry('Unknown preset: ' + parsed.args, true);
+        return 'keep';
+      }
+      presetSelect.value = option.value;
+      vscode.postMessage({ type: 'preset', value: option.value });
+      pushSystemEntry('Preset set to ' + option.label, false);
+      return 'clear';
+    }
+    if (cmd.name === 'summary') {
+      const normalized = String(parsed.args || '').trim().toLowerCase();
+      if (normalized !== 'on' && normalized !== 'off') {
+        pushSystemEntry('Usage: /summary on|off', true);
+        return 'keep';
+      }
+      const nextVisible = normalized === 'on';
+      setEventSummaryVisibility(nextVisible, true);
+      pushSystemEntry('Event summary ' + (nextVisible ? 'enabled' : 'disabled'), false);
+      return 'clear';
+    }
+
+    return null;
+  }
+
+  function targetKey(target) {
+    const kind = String(target && target.kind || '').trim();
+    if (kind === 'new-codex') return 'new-codex';
+    if (kind === 'new-claude') return 'new-claude';
+    if (kind !== 'existing') return targetKey(newSessionTargetForCurrentProvider());
+    const agent = String(target.agent || '').trim().toLowerCase();
+    const sessionId = String(target.sessionId || '').trim().toLowerCase();
+    return 'existing:' + agent + ':' + sessionId;
+  }
+
+  function providerForModelId(modelId) {
+    const key = String(modelId || '').trim();
+    return MODEL_PROVIDER[key] || null;
+  }
+
+  function currentProviderForNewSession() {
+    const modelProvider = providerForModelId(modelSelect.value);
+    if (modelProvider === 'anthropic' || modelProvider === 'openai') return modelProvider;
+    const fallback = ALL_MODEL_OPTIONS[0] && ALL_MODEL_OPTIONS[0].provider;
+    return fallback === 'anthropic' || fallback === 'openai' ? fallback : 'openai';
+  }
+
+  function newSessionTargetForCurrentProvider() {
+    return currentProviderForNewSession() === 'anthropic'
+      ? { kind: 'new-claude' }
+      : { kind: 'new-codex' };
+  }
+
+  let currentBadgeTargets = [];
+
+  function filteredModelOptions() {
+    return ALL_MODEL_OPTIONS.slice();
+  }
+
+  function refreshModelOptions(preferredModel, notifyOnFallback) {
+    const options = filteredModelOptions();
+    if (options.length === 0) {
+      modelSelect.innerHTML = '';
+      return;
+    }
+
+    modelSelect.innerHTML = options.map((option) => {
+      return '<option value="' + option.id + '">' + escapeHtml(option.label) + '</option>';
+    }).join('');
+
+    const preferred = String(preferredModel || '').trim();
+    const hasPreferred = preferred && options.some((option) => option.id === preferred);
+    const nextModel = hasPreferred ? preferred : options[0].id || FALLBACK_MODEL_ID;
+
+    modelSelect.value = nextModel;
+
+    if (notifyOnFallback && !hasPreferred) {
+      vscode.postMessage({ type: 'model', value: nextModel });
+      const fallbackLabel = options.find((option) => option.id === nextModel)?.label || nextModel;
+      pushSystemEntry('Model auto-switched to ' + fallbackLabel + ' for selected target', false);
+    }
+  }
+
+  function targetLabelFromSession(session) {
+    const project = String(session.projectName || '').trim();
+    const title = String(session.sessionTitle || '').trim();
+    const cleanTitle = title && !looksLikeSessionCode(title) ? truncateLabel(title, 34) : '';
+    const cleanProject = project && !looksLikeSessionCode(project) ? truncateLabel(project, 18) : '';
+
+    let label = session.agent.toUpperCase();
+    if (cleanProject) {
+      label += ' · ' + cleanProject;
+    }
+    if (cleanTitle) {
+      if (!sameLabel(cleanTitle, cleanProject)) {
+        label += cleanProject ? ' › ' + cleanTitle : ' · ' + cleanTitle;
+      }
+    } else {
+      label += ' › ' + String(session.id || '').slice(0, 8);
+    }
+    return label;
+  }
+
+  function selectTargetSilently(nextTarget) {
+    selectedTarget = nextTarget;
+    refreshModelOptions(modelSelect.value, true);
+    renderTargetBadges();
+    highlightSelectedEntries();
+  }
+
+  function buildTargetBadgeItems() {
+    const items = [];
+    const newTarget = newSessionTargetForCurrentProvider();
+    const newProviderLabel = newTarget.kind === 'new-claude' ? 'Claude' : 'Codex';
+    items.push({
+      key: targetKey(newTarget),
+      target: newTarget,
+      label: '1 New session (' + newProviderLabel + ')',
+      className: 'new-session',
+    });
+
+    for (let i = 0; i < activeSessions.length; i++) {
+      const session = activeSessions[i];
+      const target = {
+        kind: 'existing',
+        agent: session.agent,
+        sessionId: String(session.id || '').trim().toLowerCase(),
+        projectName: session.projectName,
+        sessionTitle: session.sessionTitle,
+      };
+      items.push({
+        key: targetKey(target),
+        target,
+        label: String(i + 2) + ' ' + targetLabelFromSession(session),
+        className: session.agent === 'claude' ? 'claude' : 'codex',
+      });
+    }
+    return items;
+  }
+
+  function ensureSelectedTargetValid() {
+    const newTarget = newSessionTargetForCurrentProvider();
+    const currentKey = targetKey(selectedTarget);
+
+    if (selectedTarget.kind === 'existing') {
+      const exists = activeSessions.some((session) => {
+        return targetKey({
+          kind: 'existing',
+          agent: session.agent,
+          sessionId: String(session.id || '').trim().toLowerCase(),
+        }) === currentKey;
+      });
+      if (exists) return false;
+    }
+
+    if (selectedTarget.kind === 'new-codex' || selectedTarget.kind === 'new-claude') {
+      if (currentKey === targetKey(newTarget)) return false;
+    }
+
+    selectedTarget = newTarget;
+    return true;
+  }
+
+  function renderTargetBadges() {
+    currentBadgeTargets = buildTargetBadgeItems();
+    const selectedKey = targetKey(selectedTarget);
+    targetBadges.innerHTML = currentBadgeTargets.map((item, index) => {
+      const selected = item.key === selectedKey ? ' selected' : '';
+      return '<button class="target-badge ' + item.className + selected + '" data-index="' + index + '" type="button" title="' + escapeHtml(item.label) + '">' + escapeHtml(item.label) + '</button>';
+    }).join('');
+
+    const nodes = targetBadges.querySelectorAll('.target-badge');
+    nodes.forEach((node) => {
+      node.addEventListener('click', () => {
+        const index = Number(node.getAttribute('data-index'));
+        if (!Number.isFinite(index) || index < 0 || index >= currentBadgeTargets.length) return;
+        const next = currentBadgeTargets[index].target;
+        selectTargetSilently(next);
+        vscode.postMessage({ type: 'set-target', value: next });
+      });
+    });
+  }
+
+  function syncTargetBadges() {
+    const targetChanged = ensureSelectedTargetValid();
+    renderTargetBadges();
+    highlightSelectedEntries();
+    if (targetChanged) {
+      vscode.postMessage({ type: 'set-target', value: selectedTarget });
+    }
+  }
+
+  function highlightSelectedEntries() {
+    const entries = feed.querySelectorAll('.entry[data-agent][data-session]');
+    entries.forEach((node) => {
+      const agent = String(node.getAttribute('data-agent') || '').toLowerCase();
+      const sessionId = String(node.getAttribute('data-session') || '').toLowerCase();
+      const selected = selectedTarget
+        && selectedTarget.kind === 'existing'
+        && String(selectedTarget.agent || '').toLowerCase() === agent
+        && String(selectedTarget.sessionId || '').toLowerCase() === sessionId;
+      if (selected) node.classList.add('selected-target');
+      else node.classList.remove('selected-target');
+    });
+  }
+
+  function submitComposer() {
+    const raw = composerInput.value;
+    const numericSlash = parseNumericSlashTargetInput(raw);
+    if (numericSlash) {
+      selectTargetSilently(numericSlash.target);
+      vscode.postMessage({ type: 'set-target', value: numericSlash.target });
+      if (numericSlash.mode === 'select-only') {
+        composerInput.value = '/' + String(numericSlash.index) + ' ';
+        composerInput.focus();
+        hideSlashMenu();
+        return;
+      }
+
+      vscode.postMessage({
+        type: 'dispatch-prompt',
+        value: {
+          target: numericSlash.target,
+          prompt: numericSlash.prompt,
+        },
+      });
+      hideSlashMenu();
+      return;
+    }
+
+    const parsed = parseSlashInput(raw);
+
+    if (parsed) {
+      const cmd = findSlashCommand(parsed.command);
+      if (!cmd && slashItems.length > 0) {
+        pickSlashCommandFromMenu(slashSelectedIndex);
+        return;
+      }
+      if (!cmd) {
+        pushSystemEntry('Unknown command: /' + parsed.command, true);
+        return;
+      }
+
+      const result = executeSlashCommand(raw);
+      if (result === 'clear') {
+        composerInput.value = '';
+      }
+      updateSlashMenu();
+      return;
+    }
+
+    const numeric = parseNumericTargetInput(raw);
+    if (numeric) {
+      selectTargetSilently(numeric.target);
+      vscode.postMessage({ type: 'set-target', value: numeric.target });
+      if (numeric.mode === 'select-only') {
+        composerInput.value = String(numeric.index) + ' ';
+        composerInput.focus();
+        hideSlashMenu();
+        return;
+      }
+
+      vscode.postMessage({
+        type: 'dispatch-prompt',
+        value: {
+          target: numeric.target,
+          prompt: numeric.prompt,
+        },
+      });
+      hideSlashMenu();
+      return;
+    }
+
+    const prompt = String(raw || '').trim();
+    if (!prompt) return;
+
+    const payload = {
+      type: 'dispatch-prompt',
+      value: {
+        target: selectedTarget,
+        prompt,
+      },
+    };
+    vscode.postMessage(payload);
+    hideSlashMenu();
   }
 
   modelSelect.addEventListener('change', () => {
     vscode.postMessage({ type: 'model', value: modelSelect.value });
+    syncTargetBadges();
+  });
+
+  presetSelect.addEventListener('change', () => {
+    vscode.postMessage({ type: 'preset', value: presetSelect.value });
   });
 
   pauseBtn.addEventListener('click', () => {
-    paused = !paused;
-    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
-    vscode.postMessage({ type: paused ? 'pause' : 'resume' });
+    setPausedState(!paused, true);
   });
 
-  let focusTimer = null;
-  focusInput.addEventListener('input', () => {
-    clearTimeout(focusTimer);
-    focusTimer = setTimeout(() => {
-      vscode.postMessage({ type: 'focus', value: focusInput.value });
-    }, 500);
+  composerInput.addEventListener('input', () => {
+    const numericSlash = parseNumericSlashTargetInput(composerInput.value);
+    if (numericSlash && numericSlash.mode === 'select-only') {
+      selectTargetSilently(numericSlash.target);
+      vscode.postMessage({ type: 'set-target', value: numericSlash.target });
+    }
+    updateSlashMenu();
   });
 
-  window.addEventListener('message', (e) => {
-    const msg = e.data;
+  composerInput.addEventListener('keydown', (event) => {
+    const parsed = parseSlashInput(composerInput.value);
+
+    if (parsed) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (slashItems.length === 0) return;
+        event.preventDefault();
+        const delta = event.key === 'ArrowDown' ? 1 : -1;
+        slashSelectedIndex = (slashSelectedIndex + delta + slashItems.length) % slashItems.length;
+        updateSlashMenu();
+        return;
+      }
+
+      if (event.key === 'Tab') {
+        if (slashItems.length === 0) return;
+        event.preventDefault();
+        pickSlashCommandFromMenu(slashSelectedIndex);
+        return;
+      }
+    }
+
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      submitComposer();
+    }
+  });
+
+  composerSend.addEventListener('click', () => {
+    submitComposer();
+    composerInput.focus();
+  });
+
+  composerInput.addEventListener('focus', () => {
+    updateSlashMenu();
+  });
+
+  composerInput.addEventListener('blur', () => {
+    setTimeout(() => hideSlashMenu(), 100);
+  });
+
+  feed.addEventListener('click', (event) => {
+    const entry = event.target && event.target.closest ? event.target.closest('.entry[data-agent][data-session]') : null;
+    if (!entry) return;
+
+    const agent = String(entry.getAttribute('data-agent') || '').toLowerCase();
+    const sessionId = String(entry.getAttribute('data-session') || '').toLowerCase();
+    if (!agent || !sessionId) return;
+
+    const session = activeSessions.find((item) => {
+      return item.agent === agent && String(item.id || '').trim().toLowerCase() === sessionId;
+    });
+
+    const next = {
+      kind: 'existing',
+      agent,
+      sessionId,
+      projectName: session ? session.projectName : undefined,
+      sessionTitle: session ? session.sessionTitle : undefined,
+    };
+
+    selectTargetSilently(next);
+    vscode.postMessage({ type: 'set-target', value: next });
+  });
+
+  refreshPauseButton();
+  refreshModelOptions(modelSelect.value, false);
+  syncTargetBadges();
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data || {};
 
     if (msg.type === 'commentary-start') {
+      if (currentEntry) finalizeCurrentCommentary();
+
+      const entry = msg.value || {};
       empty.style.display = 'none';
-      const entry = msg.value;
+
+      const safeAgent = entry.agent === 'claude' ? 'claude' : 'codex';
+      const safeSource = escapeHtml(entry.source || 'cli');
+      const rawProjectName = displayProjectName(entry);
+      const rawSessionName = displaySessionName(entry);
+      const projectName = escapeHtml(rawProjectName);
+      const sessionName = sameLabel(rawProjectName, rawSessionName) ? '' : escapeHtml(rawSessionName);
+      const eventSummary = escapeHtml(truncateLabel(entry.eventSummary || '', 160));
+
+      const sessionLineHtml = (projectName || sessionName)
+        ? ('<div class="session-line">'
+          + (projectName ? '<span class="project-name">' + projectName + '</span>' : '')
+          + ((projectName && sessionName) ? '<span class="session-divider">›</span>' : '')
+          + (sessionName ? '<span class="session-name">' + sessionName + '</span>' : '')
+          + '</div>')
+        : '';
+
       const div = document.createElement('div');
-      div.className = 'entry ' + entry.agent;
-      div.innerHTML = \`
-        <div class="entry-header">
-          <span class="agent-badge \${entry.agent}">\${entry.agent}</span>
-          <span>\${entry.projectName}</span>
-          <span class="source-badge">[\${entry.source}]</span>
-          <span>\${timeStr(entry.timestamp)}</span>
-          <span class="session-name">\${entry.sessionTitle ? entry.sessionTitle.slice(0, 40) : entry.sessionId.slice(0, 8)}</span>
-        </div>
-        <div class="commentary" id="current-commentary"><span class="cursor">|</span></div>
-      \`;
+      div.className = 'entry ' + safeAgent;
+      div.setAttribute('data-agent', safeAgent);
+      div.setAttribute('data-session', String(entry.sessionId || '').trim().toLowerCase());
+      div.innerHTML = ''
+        + '<div class="entry-header">'
+        + '  <span class="agent-badge ' + safeAgent + '">' + safeAgent + '</span>'
+        + '  <span class="source-badge">[' + safeSource + ']</span>'
+        + '  <span>' + escapeHtml(timeStr(entry.timestamp || Date.now())) + '</span>'
+        +    sessionLineHtml
+        + '</div>'
+        + '<div class="event-summary">' + eventSummary + '</div>'
+        + '<div class="commentary" id="current-commentary"><span class="cursor">|</span></div>';
+
       feed.appendChild(div);
       currentEntry = div;
       currentRawText = '';
+      pendingTypingText = '';
+      finalCommentaryText = '';
+      streamDone = false;
+      renderCurrentCommentary(true);
+      highlightSelectedEntries();
       scrollToBottom();
+      return;
+    }
+
+    if (msg.type === 'history') {
+      clearFeed();
+      const entries = Array.isArray(msg.value) ? msg.value : [];
+      for (const entry of entries) {
+        if (!entry) continue;
+        renderStaticEntry(entry);
+      }
+      empty.style.display = entries.length === 0 ? 'flex' : 'none';
+      highlightSelectedEntries();
+      scrollToBottom();
+      return;
     }
 
     if (msg.type === 'commentary-chunk') {
-      const el = document.getElementById('current-commentary');
-      if (el) {
-        currentRawText += msg.value;
-        el.innerHTML = renderCommentary(currentRawText) + '<span class="cursor">|</span>';
-        scrollToBottom();
+      if (currentEntry) {
+        pendingTypingText += String(msg.value || '');
+        ensureTypingLoop();
       }
+      return;
     }
 
     if (msg.type === 'commentary-done') {
-      const el = document.getElementById('current-commentary');
-      if (el) {
-        el.innerHTML = renderCommentary(msg.value.commentary);
-        el.removeAttribute('id');
+      if (currentEntry) {
+        finalCommentaryText = String(msg.value && msg.value.commentary || '');
+        const typedAndQueued = currentRawText + pendingTypingText;
+        if (finalCommentaryText.startsWith(typedAndQueued)) {
+          pendingTypingText += finalCommentaryText.slice(typedAndQueued.length);
+        } else {
+          pendingTypingText = finalCommentaryText.slice(currentRawText.length);
+        }
+        streamDone = true;
+        if (!pendingTypingText && currentRawText === finalCommentaryText) {
+          finalizeCurrentCommentary();
+        } else {
+          ensureTypingLoop();
+        }
       }
-      currentEntry = null;
-      scrollToBottom();
+      return;
     }
 
     if (msg.type === 'error') {
-      const div = document.createElement('div');
-      div.className = 'error-entry';
-      div.textContent = msg.value;
-      feed.appendChild(div);
-      scrollToBottom();
+      pushSystemEntry(msg.value, true);
+      return;
     }
 
     if (msg.type === 'sessions') {
-      sessionsEl.textContent = msg.value + ' session' + (msg.value !== 1 ? 's' : '');
+      const count = Number(msg.value || 0);
+      sessionsEl.textContent = count + ' session' + (count === 1 ? '' : 's');
+      return;
     }
 
     if (msg.type === 'model') {
-      modelSelect.value = msg.value;
+      refreshModelOptions(msg.value, false);
+      return;
     }
 
     if (msg.type === 'set-focus') {
-      focusInput.value = msg.value;
+      // Focus is behavior-only. We keep the composer as dispatch text.
+      return;
+    }
+
+    if (msg.type === 'set-preset') {
+      presetSelect.value = msg.value || 'auto';
+      return;
+    }
+
+    if (msg.type === 'set-show-event-summary') {
+      setEventSummaryVisibility(!!msg.value, false);
+      return;
     }
 
     if (msg.type === 'providers') {
-      // Update provider badges dynamically if needed
       const badges = document.querySelectorAll('.provider-badge');
-      msg.value.forEach((p, i) => {
-        if (badges[i]) {
-          const dot = p.available ? '●' : '○';
-          const color = p.available ? '#22c55e' : '#6b7280';
-          badges[i].style.color = color;
-          badges[i].textContent = dot + ' ' + p.label;
-          badges[i].title = p.available ? p.label + ' CLI v' + (p.version || '') : p.label + ' CLI not found';
-        }
+      (msg.value || []).forEach((provider, idx) => {
+        const badge = badges[idx];
+        if (!badge) return;
+        const dot = provider.available ? '●' : '○';
+        badge.style.color = provider.available ? '#22c55e' : '#6b7280';
+        badge.textContent = dot + ' ' + provider.label;
+        badge.title = provider.available
+          ? provider.label + ' CLI ' + (provider.version || '')
+          : provider.label + ' CLI not found';
       });
+      return;
+    }
+
+    if (msg.type === 'active-sessions') {
+      activeSessions = Array.isArray(msg.value) ? msg.value.slice() : [];
+      sessionsEl.textContent = activeSessions.length + ' session' + (activeSessions.length === 1 ? '' : 's');
+      syncTargetBadges();
+      return;
+    }
+
+    if (msg.type === 'target-selected') {
+      if (!msg.value) return;
+      selectedTarget = msg.value;
+      syncTargetBadges();
+      return;
+    }
+
+    if (msg.type === 'dispatch-status') {
+      const status = msg.value || {};
+      const state = String(status.state || '').toLowerCase();
+      const message = String(status.message || 'Dispatch update');
+      const isError = state === 'failed';
+      pushSystemEntry('[' + state + '] ' + message, isError);
+      if (state === 'sent') {
+        composerInput.value = '';
+        hideSlashMenu();
+      }
     }
   });
 </script>
 </body>
 </html>`
+}
+
+function escapeHtml(value: string): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }

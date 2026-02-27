@@ -69,7 +69,7 @@ export function parseClaudeLine(line: string, filePath: string): KibitzEvent[] {
     return []
   }
 
-  const sessionId = obj.sessionId || ''
+  const sessionId = obj.sessionId || sessionIdFromFilePath(filePath)
   const projectName = obj.cwd ? projectNameFromCwd(obj.cwd) : projectFromFilePath(filePath)
   const timestamp = obj.timestamp ? new Date(obj.timestamp).getTime() : Date.now()
 
@@ -139,4 +139,9 @@ function projectFromFilePath(filePath: string): string {
   // Convert -Users-vasily-projects-room → room
   const segments = projectDir.split('-').filter(Boolean)
   return segments[segments.length - 1] || 'unknown'
+}
+
+function sessionIdFromFilePath(filePath: string): string {
+  const basename = filePath.split('/').pop() || ''
+  return basename.replace('.jsonl', '')
 }

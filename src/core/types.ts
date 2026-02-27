@@ -20,6 +20,29 @@ export interface SessionInfo {
   lastActivity: number
 }
 
+export type DispatchTargetKind = 'existing' | 'new-codex' | 'new-claude'
+
+export interface DispatchTarget {
+  kind: DispatchTargetKind
+  agent?: 'claude' | 'codex'
+  sessionId?: string
+  projectName?: string
+  sessionTitle?: string
+}
+
+export interface DispatchRequest {
+  target: DispatchTarget
+  prompt: string
+  origin: 'vscode' | 'cli'
+}
+
+export interface DispatchStatus {
+  state: 'queued' | 'started' | 'sent' | 'failed'
+  message: string
+  target: DispatchTarget
+  timestamp: number
+}
+
 export type ModelId =
   | 'claude-opus-4-6'
   | 'claude-sonnet-4-6'

@@ -2,7 +2,7 @@
   "name": "kibitz",
   "displayName": "Kibitz",
   "description": "Real-time entertaining commentary on AI coding agent sessions (Claude Code, Codex CLI)",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "publisher": "vasily",
   "license": "MIT",
   "engines": {
@@ -29,9 +29,18 @@
     ]
   },
   "scripts": {
-    "build": "npm run build:ext && npm run build:cli",
+    "build": "npm run build:core && npm run build:ext && npm run build:vscode-launcher && npm run build:cli",
+    "build:core": "esbuild src/core/watcher.ts src/core/commentary.ts src/core/platform-support.ts src/core/session-dispatch.ts --bundle --outdir=dist/core --format=cjs --platform=node --target=node18",
     "build:ext": "esbuild src/vscode/extension.ts --bundle --outfile=dist/vscode/extension.js --external:vscode --format=cjs --platform=node --target=node18",
+    "build:vscode-launcher": "esbuild src/vscode/interactive-launcher.ts --bundle --outfile=dist/vscode/interactive-launcher.js --format=cjs --platform=node --target=node18 --banner:js='#!/usr/bin/env node'",
     "build:cli": "esbuild src/cli/index.ts --bundle --outfile=dist/cli/index.js --format=cjs --platform=node --target=node18 --banner:js='#!/usr/bin/env node'",
+    "typecheck": "npx tsc -p tsconfig.json --pretty false",
+    "check:compat": "npm run build && node scripts/check-compat.js",
+    "test:ui": "node scripts/test-panel-ui.js",
+    "test:all": "npm run typecheck && npm run check:compat && npm run test:ui",
+    "check:session-names": "npm run build && npm run typecheck && node scripts/visual-session-names.js --once",
+    "check:model-persistence": "npm run typecheck && node scripts/test-model-persistence.js",
+    "deploy:vscode": "npm run check:compat && npm run typecheck && node scripts/deploy-vscode-extension.js",
     "watch": "npm run build:ext -- --watch",
     "package": "vsce package"
   },
@@ -39,6 +48,7 @@
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.24.0",
+    "jsdom": "^24.1.1",
     "typescript": "^5.5.0"
   },
   "dependencies": {

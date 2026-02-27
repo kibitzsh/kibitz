@@ -1,23 +1,34 @@
 import * as readline from 'readline'
 import { SessionWatcher } from '../core/watcher'
 import { CommentaryEngine } from '../core/commentary'
-import { KeyResolver, ProviderId, ModelId, MODELS, DEFAULT_MODEL, CommentaryEntry } from '../core/types'
+import {
+  CommentaryEntry,
+  DEFAULT_MODEL,
+  DispatchRequest,
+  DispatchTarget,
+  KeyResolver,
+  MODELS,
+  ModelId,
+  ProviderId,
+  SessionInfo,
+} from '../core/types'
+import { inheritShellPath } from '../core/platform-support'
+import { SessionDispatchService } from '../core/session-dispatch'
 
-// Simple colors without external deps (ANSI escape codes)
+// Minimal ANSI helpers (no dependency on chalk).
 const c = {
   bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
   red: (s: string) => `\x1b[31m${s}\x1b[0m`,
   green: (s: string) => `\x1b[32m${s}\x1b[0m`,
   yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  blue: (s: string) => `\x1b[34m${s}\x1b[0m`,
-  magenta: (s: string) => `\x1b[35m${s}\x1b[0m`,
   cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
 }
 
-// No API keys needed — Claude uses claude CLI, OpenAI uses codex CLI (both subscriptions)
 const noopKeyResolver: KeyResolver = {
-  async getKey(_provider: ProviderId) { return 'subscription' },
+  async getKey(_provider: ProviderId) {
+    return 'subscription'
+  },
 }
 
 function parseArgs(args: string[]): { model: ModelId; focus: string; agent: string | null } {
@@ -25,17 +36,28 @@ function parseArgs(args: string[]): { model: ModelId; focus: string; agent: stri
   let focus = ''
   let agent: string | null = null
 
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--model' && args[i + 1]) {
-      const val = args[++i]
-      // Support short names
-      const found = MODELS.find(m => m.id === val || m.label.toLowerCase().includes(val.toLowerCase()))
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === '--model' && args[index + 1]) {
+      const value = args[++index]
+      const found = MODELS.find((entry) => {
+        return entry.id === value || entry.label.toLowerCase().includes(value.toLowerCase())
+      })
       if (found) model = found.id
-    } else if (args[i] === '--focus' && args[i + 1]) {
-      focus = args[++i]
-    } else if (args[i] === '--agent' && args[i + 1]) {
-      agent = args[++i]
-    } else if (args[i] === '--help' || args[i] === '-h') {
+      continue
+    }
+
+    if (arg === '--focus' && args[index + 1]) {
+      focus = args[++index]
+      continue
+    }
+
+    if (arg === '--agent' && args[index + 1]) {
+      agent = args[++index]
+      continue
+    }
+
+    if (arg === '--help' || arg === '-h') {
       printHelp()
       process.exit(0)
     }
@@ -46,34 +68,42 @@ function parseArgs(args: string[]): { model: ModelId; focus: string; agent: stri
 
 function printHelp(): void {
   console.log(`
-${c.bold('KIBITZ')} — Live commentary on AI coding agents
+${c.bold('KIBITZ')} — Live commentary + cross-session dispatch
 
 ${c.bold('Usage:')}
   kibitz [options]
 
 ${c.bold('Options:')}
   --model <name>   Commentary model (opus, sonnet, haiku, gpt-4o, gpt-4o-mini)
-  --focus <text>    Focus instructions (e.g., "roast everything")
-  --agent <name>    Filter by agent (claude, codex)
-  --help, -h        Show this help
+  --focus <text>   Focus instructions for commentary
+  --agent <name>   Filter events by agent (claude, codex)
+  --help, -h       Show this help
 
-${c.bold('Requirements:')}
-  Claude models → requires 'claude' CLI (your subscription)
-  GPT models    → requires 'codex' CLI (your subscription)
+${c.bold('Slash commands:')}
+  /help
+  /pause
+  /resume
+  /focus <text>
+  /model <id-or-label>
+  /preset <id>
+  /sessions
+  /target <index|agent:sessionId|new-codex|new-claude>
 
-${c.bold('Interactive:')}
-  Type while running to update focus/tone instructions.
-  Press Ctrl+C to exit.
+${c.bold('Composer behavior:')}
+  Plain text sends prompt to selected target.
 `)
 }
 
 function timeStr(): string {
-  const d = new Date()
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return new Date().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 function formatCommentary(text: string): string {
-  return text
+  return String(text || '')
     .replace(/\*\*(.+?)\*\*/g, (_, inner) => c.bold(inner))
     .replace(/`([^`]+)`/g, (_, code) => c.cyan(code))
     .replace(/^[-*] /gm, '  • ')
@@ -83,31 +113,137 @@ function agentColor(agent: string): (s: string) => string {
   return agent === 'claude' ? c.yellow : c.green
 }
 
-async function main() {
-  const opts = parseArgs(process.argv.slice(2))
+function visibleSessionName(session: SessionInfo): string {
+  const title = String(session.sessionTitle || '').trim()
+  if (title) return title
+  const project = String(session.projectName || '').trim()
+  if (project) return project
+  return `${session.agent} session`
+}
 
-  console.log(c.bold('\n  KIBITZ') + c.dim(' — Live AI agent commentary\n'))
-  console.log(c.dim(`  Model: ${opts.model}`))
-  if (opts.focus) console.log(c.dim(`  Focus: ${opts.focus}`))
-  if (opts.agent) console.log(c.dim(`  Agent filter: ${opts.agent}`))
-  console.log(c.dim('  Watching for sessions... (type to change focus, Ctrl+C to exit)\n'))
+function normalizeTarget(target: DispatchTarget): DispatchTarget {
+  if (target.kind === 'new-claude') return { kind: 'new-claude' }
+  if (target.kind === 'new-codex') return { kind: 'new-codex' }
+
+  return {
+    kind: 'existing',
+    agent: target.agent,
+    sessionId: String(target.sessionId || '').trim().toLowerCase(),
+    projectName: target.projectName,
+    sessionTitle: target.sessionTitle,
+  }
+}
+
+function parseTargetArg(rawArg: string, sessions: SessionInfo[]): DispatchTarget | null {
+  const raw = String(rawArg || '').trim()
+  if (!raw) return null
+
+  if (raw === 'new-codex') return { kind: 'new-codex' }
+  if (raw === 'new-claude') return { kind: 'new-claude' }
+
+  if (/^\d+$/.test(raw)) {
+    const index = Number(raw)
+    if (index < 1 || index > sessions.length) return null
+    const session = sessions[index - 1]
+    return {
+      kind: 'existing',
+      agent: session.agent,
+      sessionId: String(session.id || '').trim().toLowerCase(),
+      projectName: session.projectName,
+      sessionTitle: session.sessionTitle,
+    }
+  }
+
+  const match = raw.match(/^(claude|codex):(.+)$/i)
+  if (!match) return null
+  const agent = match[1].toLowerCase() as 'claude' | 'codex'
+  const sessionId = String(match[2] || '').trim().toLowerCase()
+  if (!sessionId) return null
+
+  const found = sessions.find((session) => {
+    return session.agent === agent && String(session.id || '').trim().toLowerCase() === sessionId
+  })
+
+  return {
+    kind: 'existing',
+    agent,
+    sessionId,
+    projectName: found?.projectName,
+    sessionTitle: found?.sessionTitle,
+  }
+}
+
+function describeTarget(target: DispatchTarget): string {
+  if (target.kind === 'new-codex') return 'new-codex'
+  if (target.kind === 'new-claude') return 'new-claude'
+  return `${target.agent || 'unknown'}:${target.sessionId || 'unknown'}`
+}
+
+async function main(): Promise<void> {
+  inheritShellPath()
+
+  const options = parseArgs(process.argv.slice(2))
+
+  console.log(c.bold('\n  KIBITZ') + c.dim(' — Live AI commentary + session dispatch\n'))
+  console.log(c.dim(`  Model: ${options.model}`))
+  if (options.focus) console.log(c.dim(`  Focus: ${options.focus}`))
+  if (options.agent) console.log(c.dim(`  Agent filter: ${options.agent}`))
+  console.log(c.dim('  Watching for sessions... type /help for commands.\n'))
 
   const watcher = new SessionWatcher()
   const engine = new CommentaryEngine(noopKeyResolver)
+  const dispatch = new SessionDispatchService({
+    getActiveSessions: () => watcher.getActiveSessions(),
+  })
 
-  engine.setModel(opts.model)
-  if (opts.focus) engine.setFocus(opts.focus)
+  engine.setModel(options.model)
+  if (options.focus) engine.setFocus(options.focus)
+
+  let selectedTarget: DispatchTarget = { kind: 'new-codex' }
+
+  function activeSessions(): SessionInfo[] {
+    return watcher.getActiveSessions().filter((session) => {
+      return !options.agent || session.agent === options.agent
+    })
+  }
+
+  function printSessions(): void {
+    const sessions = activeSessions()
+    if (sessions.length === 0) {
+      console.log(`  ${c.dim('No active sessions in watcher window.')}`)
+      return
+    }
+
+    console.log(`  ${c.bold('Active sessions:')}`)
+    sessions.forEach((session, index) => {
+      const marker = selectedTarget.kind === 'existing'
+        && selectedTarget.agent === session.agent
+        && String(selectedTarget.sessionId || '').toLowerCase() === String(session.id || '').toLowerCase()
+        ? c.green('*')
+        : ' '
+
+      const project = session.projectName ? ` project=${session.projectName}` : ''
+      const title = visibleSessionName(session)
+      console.log(`  ${marker} [${index + 1}] ${session.agent}:${session.id} ${title}${project}`)
+    })
+  }
+
+  function printPromptLine(): void {
+    const target = describeTarget(selectedTarget)
+    rl.setPrompt(c.dim(`kibitz[${target}]> `))
+    rl.prompt()
+  }
 
   watcher.on('event', (event) => {
-    if (opts.agent && event.agent !== opts.agent) return
+    if (options.agent && event.agent !== options.agent) return
     engine.addEvent(event)
   })
 
   engine.on('commentary-start', (entry: CommentaryEntry) => {
-    const ac = agentColor(entry.agent)
-    const badge = ac(`${entry.agent}/${entry.projectName}`)
+    const color = agentColor(entry.agent)
+    const badge = color(`${entry.agent}/${entry.projectName}`)
     const source = c.dim(`(${entry.source})`)
-    console.log(`  ${c.dim(timeStr())} ${badge} ${source}`)
+    console.log(`\n  ${c.dim(timeStr())} ${badge} ${source}`)
     console.log(`  ${c.dim(entry.eventSummary)}`)
     process.stdout.write('  ')
   })
@@ -118,53 +254,157 @@ async function main() {
 
   engine.on('commentary-done', () => {
     console.log('\n')
+    printPromptLine()
   })
 
-  engine.on('error', (err: Error) => {
-    console.log(`  ${c.red('Error:')} ${err.message}\n`)
+  engine.on('error', (error: Error) => {
+    console.log(`\n  ${c.red('Error:')} ${error.message}`)
+    printPromptLine()
+  })
+
+  dispatch.on('status', (status) => {
+    const label = status.state.toUpperCase()
+    const color = status.state === 'failed'
+      ? c.red
+      : status.state === 'sent'
+        ? c.green
+        : c.cyan
+    console.log(`\n  ${color(label)} ${status.message}`)
+    printPromptLine()
   })
 
   watcher.start()
 
-  // Interactive focus input
-  if (process.stdin.isTTY) {
-    readline.emitKeypressEvents(process.stdin)
-    process.stdin.setRawMode(true)
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+    historySize: 1000,
+  })
 
-    let inputBuffer = ''
-    process.stdin.on('keypress', (_str, key) => {
-      if (key.ctrl && key.name === 'c') {
-        watcher.stop()
-        console.log(c.dim('\n  Kibitz out. '))
-        process.exit(0)
-      }
-      if (key.name === 'return') {
-        if (inputBuffer.trim()) {
-          engine.setFocus(inputBuffer.trim())
-          console.log(c.dim(`\n  Focus updated: "${inputBuffer.trim()}"\n`))
-        }
-        inputBuffer = ''
+  async function handleSlash(raw: string): Promise<void> {
+    const body = raw.slice(1).trim()
+    const firstSpace = body.indexOf(' ')
+    const command = (firstSpace === -1 ? body : body.slice(0, firstSpace)).toLowerCase()
+    const args = firstSpace === -1 ? '' : body.slice(firstSpace + 1).trim()
+
+    if (command === 'help') {
+      printHelp()
+      return
+    }
+
+    if (command === 'pause') {
+      engine.pause()
+      console.log(`  ${c.dim('Commentary paused')}`)
+      return
+    }
+
+    if (command === 'resume') {
+      engine.resume()
+      console.log(`  ${c.dim('Commentary resumed')}`)
+      return
+    }
+
+    if (command === 'focus') {
+      if (!args) {
+        console.log(`  ${c.red('Usage: /focus <text>')}`)
         return
       }
-      if (key.name === 'backspace') {
-        inputBuffer = inputBuffer.slice(0, -1)
+      engine.setFocus(args)
+      console.log(`  ${c.dim('Focus updated')}`)
+      return
+    }
+
+    if (command === 'model') {
+      if (!args) {
+        console.log(`  ${c.red('Usage: /model <id-or-label>')}`)
         return
       }
-      if (_str) {
-        inputBuffer += _str
+      const found = MODELS.find((model) => {
+        const needle = args.toLowerCase()
+        return model.id.toLowerCase() === needle || model.label.toLowerCase().includes(needle)
+      })
+      if (!found) {
+        console.log(`  ${c.red('Unknown model: ' + args)}`)
+        return
       }
-    })
+      engine.setModel(found.id)
+      console.log(`  ${c.dim('Model set to ' + found.label)}`)
+      return
+    }
+
+    if (command === 'preset') {
+      if (!args) {
+        console.log(`  ${c.red('Usage: /preset <auto|critical-coder|precise-short|emotional|newbie>')}`)
+        return
+      }
+      engine.setPreset(args)
+      console.log(`  ${c.dim('Preset set to ' + engine.getPreset())}`)
+      return
+    }
+
+    if (command === 'sessions') {
+      printSessions()
+      return
+    }
+
+    if (command === 'target') {
+      if (!args) {
+        console.log(`  ${c.red('Usage: /target <index|agent:sessionId|new-codex|new-claude>')}`)
+        return
+      }
+      const next = parseTargetArg(args, activeSessions())
+      if (!next) {
+        console.log(`  ${c.red('Invalid target: ' + args)}`)
+        return
+      }
+      selectedTarget = normalizeTarget(next)
+      console.log(`  ${c.dim('Target set to ' + describeTarget(selectedTarget))}`)
+      return
+    }
+
+    console.log(`  ${c.red('Unknown command: /' + command)}`)
   }
 
-  // Keep running
-  process.on('SIGINT', () => {
+  rl.on('line', async (line) => {
+    const trimmed = String(line || '').trim()
+    if (!trimmed) {
+      printPromptLine()
+      return
+    }
+
+    if (trimmed.startsWith('/')) {
+      await handleSlash(trimmed)
+      printPromptLine()
+      return
+    }
+
+    const request: DispatchRequest = {
+      target: selectedTarget,
+      prompt: trimmed,
+      origin: 'cli',
+    }
+
+    await dispatch.dispatch(request)
+    printPromptLine()
+  })
+
+  rl.on('close', () => {
     watcher.stop()
-    console.log(c.dim('\n  Kibitz out. '))
+    console.log(c.dim('\n  Kibitz out.'))
     process.exit(0)
   })
+
+  process.on('SIGINT', () => {
+    watcher.stop()
+    rl.close()
+  })
+
+  printPromptLine()
 }
 
-main().catch(err => {
-  console.error(c.red(`Fatal: ${err.message}`))
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error(c.red(`Fatal: ${message}`))
   process.exit(1)
 })
