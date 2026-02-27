@@ -3,6 +3,8 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { CommentaryEngine } from '../core/commentary'
 import {
+  COMMENTARY_STYLE_OPTIONS,
+  CommentaryStyleId,
   CommentaryEntry,
   DispatchStatus,
   DispatchTarget,
@@ -21,6 +23,7 @@ type WebviewToExtensionMessage =
   | { type: 'focus'; value: string }
   | { type: 'model'; value: ModelId }
   | { type: 'preset'; value: string }
+  | { type: 'format-styles'; value: CommentaryStyleId[] }
   | { type: 'show-event-summary'; value: boolean }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -37,6 +40,7 @@ type ExtensionToWebviewMessage =
   | { type: 'model'; value: ModelId }
   | { type: 'set-focus'; value: string }
   | { type: 'set-preset'; value: string }
+  | { type: 'set-format-styles'; value: CommentaryStyleId[] }
   | { type: 'set-show-event-summary'; value: boolean }
   | { type: 'providers'; value: ProviderStatus[] }
   | { type: 'active-sessions'; value: SessionInfo[] }
@@ -80,6 +84,11 @@ export class KibitzPanel {
 
       if (msg.type === 'preset') {
         this.engine.setPreset(msg.value)
+        return
+      }
+
+      if (msg.type === 'format-styles') {
+        this.engine.setFormatStyles(msg.value)
         return
       }
 
@@ -129,6 +138,7 @@ export class KibitzPanel {
     this.postMessage({ type: 'sessions', value: 0 })
     this.postMessage({ type: 'model', value: this.engine.getModel() })
     this.postMessage({ type: 'set-preset', value: this.engine.getPreset() })
+    this.postMessage({ type: 'set-format-styles', value: this.engine.getFormatStyles() })
     this.postMessage({ type: 'set-show-event-summary', value: this.showEventSummary })
     this.postMessage({ type: 'providers', value: this.providers })
     this.postMessage({ type: 'active-sessions', value: [] })
@@ -171,6 +181,11 @@ export class KibitzPanel {
   updatePreset(preset: string): void {
     if (this.disposed) return
     this.postMessage({ type: 'set-preset', value: preset })
+  }
+
+  updateFormatStyles(styleIds: CommentaryStyleId[]): void {
+    if (this.disposed) return
+    this.postMessage({ type: 'set-format-styles', value: styleIds.slice() })
   }
 
   updateProviders(providers: ProviderStatus[]): void {
@@ -216,7 +231,13 @@ export class KibitzPanel {
     if (fs.existsSync(mediaPath)) {
       return fs.readFileSync(mediaPath, 'utf8')
     }
-    return getInlineHtml(this.providers, this.extensionVersion, this.engine.getModel(), this.engine.getPreset())
+    return getInlineHtml(
+      this.providers,
+      this.extensionVersion,
+      this.engine.getModel(),
+      this.engine.getPreset(),
+      this.engine.getFormatStyles(),
+    )
   }
 }
 
@@ -225,6 +246,7 @@ export function getInlineHtml(
   extensionVersion: string,
   initialModel: ModelId,
   initialPreset: string,
+  initialFormatStyles: CommentaryStyleId[] = COMMENTARY_STYLE_OPTIONS.map((option) => option.id),
 ): string {
   const availableProviders = new Set(providers.filter((provider) => provider.available).map((provider) => provider.provider))
   const availableModels = MODELS.filter((model) => availableProviders.has(model.provider))
@@ -250,6 +272,13 @@ export function getInlineHtml(
     return `<option value="${item.value}"${selected}>${escapeHtml(item.label)}</option>`
   }).join('\n')
 
+  const formatStyleOptionsData = JSON.stringify(COMMENTARY_STYLE_OPTIONS).replace(/</g, '\\u003c')
+  const initialFormatStylesData = JSON.stringify(
+    Array.isArray(initialFormatStyles) && initialFormatStyles.length > 0
+      ? initialFormatStyles
+      : COMMENTARY_STYLE_OPTIONS.map((option) => option.id),
+  ).replace(/</g, '\\u003c')
+
   const providerBadges = providers.map((provider) => {
     const dot = provider.available ? '●' : '○'
     const color = provider.available ? '#22c55e' : '#6b7280'
@@ -274,8 +303,8 @@ export function getInlineHtml(
     --input-bg: var(--vscode-input-background);
     --input-fg: var(--vscode-input-foreground);
     --input-border: var(--vscode-input-border, #52525b);
-    --codex-accent: rgba(16, 185, 129, 0.42);
-    --claude-accent: rgba(249, 115, 22, 0.45);
+    --codex-provider: #10b981;
+    --claude-provider: #f97316;
     --badge-vscode: #6366f1;
   }
   * { box-sizing: border-box; }
@@ -322,8 +351,9 @@ export function getInlineHtml(
     border: 1px solid #334155;
   }
   .badge-sessions {
-    color: white;
-    background: var(--badge-vscode);
+    color: #cbd5e1;
+    background: rgba(71, 85, 105, 0.38);
+    border: 1px solid rgba(100, 116, 139, 0.52);
   }
   .provider-badge {
     font-size: 12px;
@@ -335,18 +365,101 @@ export function getInlineHtml(
     align-items: center;
     gap: 6px;
   }
-  .controls select,
-  .controls button {
-    background: var(--input-bg);
-    color: var(--input-fg);
-    border: 1px solid var(--input-border);
-    border-radius: 6px;
-    font-size: 12px;
-    padding: 4px 8px;
-  }
   .controls button {
     min-width: 32px;
     cursor: pointer;
+  }
+  #pause-btn {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: #e2e8f0;
+    border: none;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 6px 9px;
+  }
+  #pause-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  #pause-btn:focus {
+    outline: 1px solid var(--vscode-focusBorder, #0ea5e9);
+  }
+  .native-select-hidden {
+    display: none;
+  }
+  .menu-host {
+    position: relative;
+  }
+  .menu-trigger {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: #e2e8f0;
+    border: none;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1.15;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-weight: 600;
+    padding: 5px 10px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .menu-trigger:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .menu-trigger:focus {
+    outline: 1px solid var(--vscode-focusBorder, #0ea5e9);
+  }
+  .menu-trigger .caret {
+    color: #9ca3af;
+    opacity: 0.95;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .menu-list {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    min-width: 230px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: rgba(24, 24, 27, 0.98);
+    border: 1px solid rgba(82, 82, 91, 0.5);
+    border-radius: 8px;
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45);
+    padding: 4px;
+    z-index: 10;
+  }
+  .controls .menu-list {
+    top: calc(100% + 6px);
+    bottom: auto;
+    left: auto;
+    right: 0;
+  }
+  .menu-list.hidden { display: none; }
+  .menu-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 11px;
+    line-height: 1.2;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 5px 7px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .menu-option:hover {
+    background: rgba(251, 146, 60, 0.2);
+  }
+  .menu-option.selected {
+    background: rgba(251, 146, 60, 0.27);
+    color: #fdba74;
   }
   .feed {
     flex: 1;
@@ -356,15 +469,14 @@ export function getInlineHtml(
   .entry {
     margin-bottom: 12px;
     padding: 8px 10px;
-    border-left: 2px solid rgba(99, 102, 241, 0.2);
+    border-left: 2px solid rgba(148, 163, 184, 0.35);
     cursor: pointer;
   }
-  .entry.codex { border-left-color: rgba(16, 185, 129, 0.55); }
-  .entry.claude { border-left-color: rgba(249, 115, 22, 0.55); }
+  .entry.codex { border-left-color: var(--codex-provider); }
+  .entry.claude { border-left-color: var(--claude-provider); }
   .entry.selected-target {
     outline: none;
     border-left-width: 3px;
-    border-left-color: rgba(99, 102, 241, 0.75);
   }
   .entry:hover { background: transparent; }
   .entry-header {
@@ -384,8 +496,8 @@ export function getInlineHtml(
     padding: 2px 6px;
     color: #fff;
   }
-  .agent-badge.codex { background: #10b981; }
-  .agent-badge.claude { background: #f97316; }
+  .agent-badge.codex { background: var(--codex-provider); }
+  .agent-badge.claude { background: var(--claude-provider); }
   .source-badge { opacity: 0.7; }
   .session-line {
     width: 100%;
@@ -526,8 +638,8 @@ export function getInlineHtml(
     border-color: var(--vscode-focusBorder, #0ea5e9);
   }
   .target-badge.selected {
-    background: rgba(99, 102, 241, 0.28);
-    border-color: rgba(99, 102, 241, 0.95);
+    background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(148, 163, 184, 0.42);
   }
   .composer-input {
     width: 100%;
@@ -561,15 +673,59 @@ export function getInlineHtml(
   .send-btn:hover {
     border-color: var(--vscode-focusBorder, #0ea5e9);
   }
-  .composer-help {
+  .composer-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow: visible;
+    white-space: nowrap;
+  }
+  .composer-meta .menu-trigger {
+    background: transparent;
+    color: #9ca3af;
+    border: none;
+    box-shadow: none;
+    padding: 3px 0;
+  }
+  .composer-meta .menu-trigger:hover {
+    background: transparent;
+    color: #cbd5e1;
+  }
+  .composer-meta .menu-trigger:focus,
+  .composer-meta .menu-trigger:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+  .composer-meta #preset-menu-label,
+  .composer-meta #style-menu-label {
+    color: #9ca3af;
+  }
+  .style-menu {
+    min-width: 230px;
+  }
+  .style-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 11px;
-    opacity: 0.65;
+    line-height: 1.2;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 4px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .style-item:hover {
+    background: rgba(251, 146, 60, 0.2);
+  }
+  .style-item input {
+    margin: 0;
   }
   .slash-menu {
     position: absolute;
     left: 12px;
     right: 12px;
-    bottom: 84px;
+    bottom: 118px;
     z-index: 8;
     max-height: 240px;
     overflow-y: auto;
@@ -623,8 +779,15 @@ export function getInlineHtml(
     <span class="badge badge-sessions" id="sessions">0 sessions</span>
 
     <div class="controls">
-      <select id="model-select">${modelOptionsHtml}</select>
-      <select id="preset-select">${templateOptionsHtml}</select>
+      <div class="menu-host">
+        <button id="model-menu-btn" class="menu-trigger" title="Model" aria-label="Model">
+          <span class="icon">🤖</span>
+          <span id="model-menu-label">Model</span>
+          <span class="caret">▾</span>
+        </button>
+        <div id="model-menu" class="menu-list hidden"></div>
+      </div>
+      <select id="model-select" class="native-select-hidden">${modelOptionsHtml}</select>
       <button id="pause-btn" title="Pause commentary" aria-label="Pause commentary">⏸</button>
     </div>
   </div>
@@ -643,11 +806,29 @@ export function getInlineHtml(
       <textarea
         id="composer-input"
         class="composer-input"
-        placeholder="Send prompt to selected session (Enter=send, Shift+Enter=newline, / for commands)"
+        placeholder="Send prompt (Enter=send, Shift+Enter=newline, / for commands). Use /1 to select target, /1 text to send."
       ></textarea>
       <button id="composer-send" class="send-btn" title="Send" aria-label="Send">➤</button>
     </div>
-    <div class="composer-help">Targets: click a badge or type <code>/1</code>. <code>/1</code> selects and keeps <code>/1 </code> in input. <code>/1 fix bug</code> sends to 1. (Also works: <code>fix bug 1</code>.)</div>
+    <div class="composer-meta">
+      <div class="menu-host">
+        <button id="preset-menu-btn" class="menu-trigger" title="Summary tone" aria-label="Summary tone">
+          <span class="icon">🎛</span>
+          <span id="preset-menu-label">Summary tone</span>
+          <span class="caret">▾</span>
+        </button>
+        <div id="preset-menu" class="menu-list hidden"></div>
+      </div>
+      <select id="preset-select" class="native-select-hidden">${templateOptionsHtml}</select>
+      <div class="menu-host">
+        <button id="style-menu-btn" class="menu-trigger" title="Response formats" aria-label="Response formats">
+          <span class="icon">🧩</span>
+          <span id="style-menu-label">Response formats</span>
+          <span class="caret">▾</span>
+        </button>
+        <div id="style-menu" class="menu-list style-menu hidden"></div>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -656,14 +837,25 @@ export function getInlineHtml(
   const empty = document.getElementById('empty');
   const sessionsEl = document.getElementById('sessions');
   const modelSelect = document.getElementById('model-select');
+  const modelMenuBtn = document.getElementById('model-menu-btn');
+  const modelMenu = document.getElementById('model-menu');
+  const modelMenuLabel = document.getElementById('model-menu-label');
   const presetSelect = document.getElementById('preset-select');
+  const presetMenuBtn = document.getElementById('preset-menu-btn');
+  const presetMenu = document.getElementById('preset-menu');
+  const presetMenuLabel = document.getElementById('preset-menu-label');
   const pauseBtn = document.getElementById('pause-btn');
+  const styleMenuBtn = document.getElementById('style-menu-btn');
+  const styleMenuLabel = document.getElementById('style-menu-label');
+  const styleMenu = document.getElementById('style-menu');
   const targetBadges = document.getElementById('target-badges');
   const composerInput = document.getElementById('composer-input');
   const composerSend = document.getElementById('composer-send');
   const slashMenu = document.getElementById('slash-menu');
 
   const ALL_MODEL_OPTIONS = ${modelData};
+  const FORMAT_STYLE_OPTIONS = ${formatStyleOptionsData};
+  const INITIAL_FORMAT_STYLES = ${initialFormatStylesData};
   const FALLBACK_MODEL_ID = ${JSON.stringify(fallbackModel)};
   const MODEL_PROVIDER = Object.fromEntries(ALL_MODEL_OPTIONS.map((opt) => [opt.id, opt.provider]));
   const PROVIDER_AGENT = { anthropic: 'claude', openai: 'codex' };
@@ -682,10 +874,20 @@ export function getInlineHtml(
   let paused = false;
   let autoScroll = true;
   let activeSessions = [];
+  let pendingActiveSessions = null;
   let selectedTarget = { kind: 'new-codex' };
+  let pendingDispatches = [];
   let slashItems = [];
   let slashSelectedIndex = 0;
   let showEventSummary = false;
+  let selectedFormatStyles = new Set(
+    (Array.isArray(INITIAL_FORMAT_STYLES) ? INITIAL_FORMAT_STYLES : [])
+      .map((value) => String(value || '').trim())
+      .filter((value) => FORMAT_STYLE_OPTIONS.some((option) => option.id === value)),
+  );
+  if (selectedFormatStyles.size === 0) {
+    selectedFormatStyles = new Set(FORMAT_STYLE_OPTIONS.map((option) => option.id));
+  }
 
   let currentEntry = null;
   let currentRawText = '';
@@ -698,6 +900,65 @@ export function getInlineHtml(
 
   function sessionKey(agent, sessionId) {
     return String(agent || '').toLowerCase() + ':' + String(sessionId || '').trim().toLowerCase();
+  }
+
+  function sessionKeyFromInfo(session) {
+    return sessionKey(session && session.agent, session && session.id);
+  }
+
+  function isTypingDraftLocked() {
+    return String(composerInput.value || '').trim().length > 0;
+  }
+
+  function reorderSessionsStable(nextSessions) {
+    const incoming = Array.isArray(nextSessions) ? nextSessions.slice() : [];
+    const byKey = new Map();
+    for (const session of incoming) {
+      const key = sessionKeyFromInfo(session);
+      if (!key || byKey.has(key)) continue;
+      byKey.set(key, session);
+    }
+
+    const ordered = [];
+    for (const prev of activeSessions) {
+      const key = sessionKeyFromInfo(prev);
+      if (!byKey.has(key)) continue;
+      ordered.push(byKey.get(key));
+      byKey.delete(key);
+    }
+
+    for (const session of incoming) {
+      const key = sessionKeyFromInfo(session);
+      if (!byKey.has(key)) continue;
+      ordered.push(byKey.get(key));
+      byKey.delete(key);
+    }
+
+    return ordered;
+  }
+
+  function applyActiveSessions(nextSessions) {
+    activeSessions = reorderSessionsStable(nextSessions);
+    sessionsEl.textContent = activeSessions.length + ' session' + (activeSessions.length === 1 ? '' : 's');
+    syncTargetBadges();
+  }
+
+  function queueOrApplyActiveSessions(nextSessions) {
+    const incoming = Array.isArray(nextSessions) ? nextSessions.slice() : [];
+    if (isTypingDraftLocked()) {
+      pendingActiveSessions = incoming;
+      return;
+    }
+    pendingActiveSessions = null;
+    applyActiveSessions(incoming);
+  }
+
+  function flushPendingActiveSessions() {
+    if (!pendingActiveSessions) return;
+    if (isTypingDraftLocked()) return;
+    const incoming = pendingActiveSessions;
+    pendingActiveSessions = null;
+    applyActiveSessions(incoming);
   }
 
   function escapeHtml(value) {
@@ -998,6 +1259,224 @@ export function getInlineHtml(
     }) || null;
   }
 
+  function optionLabel(option) {
+    return String((option && option.textContent) || (option && option.value) || '').trim();
+  }
+
+  function syncModelMenuButton() {
+    const option = modelSelect.options[modelSelect.selectedIndex] || null;
+    const label = option ? optionLabel(option) : 'Model';
+    if (modelMenuLabel) modelMenuLabel.textContent = label;
+    const aria = 'Model: ' + label;
+    modelMenuBtn.title = aria;
+    modelMenuBtn.setAttribute('aria-label', aria);
+  }
+
+  function syncPresetMenuButton() {
+    const option = presetSelect.options[presetSelect.selectedIndex] || null;
+    const label = option ? optionLabel(option) : 'Summary tone';
+    if (presetMenuLabel) presetMenuLabel.textContent = label;
+    const aria = 'Summary tone: ' + label;
+    presetMenuBtn.title = aria;
+    presetMenuBtn.setAttribute('aria-label', aria);
+  }
+
+  function renderModelMenu() {
+    const options = Array.from(modelSelect.options);
+    modelMenu.innerHTML = options.map((option) => {
+      const value = String(option.value || '');
+      const label = optionLabel(option);
+      const selected = value === modelSelect.value ? ' selected' : '';
+      return (
+        '<div class="menu-option' + selected + '" data-value="' + escapeHtml(value) + '">' +
+          '<span>' + escapeHtml(label) + '</span>' +
+          '<span>' + (selected ? '✓' : '') + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    const items = modelMenu.querySelectorAll('.menu-option[data-value]');
+    items.forEach((item) => {
+      item.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        const value = String(item.getAttribute('data-value') || '');
+        if (!value) return;
+        if (modelSelect.value !== value) {
+          modelSelect.value = value;
+          modelSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+        } else {
+          syncModelMenuButton();
+        }
+        hideModelMenu();
+      });
+    });
+  }
+
+  function renderPresetMenu() {
+    const options = Array.from(presetSelect.options);
+    presetMenu.innerHTML = options.map((option) => {
+      const value = String(option.value || '');
+      const label = optionLabel(option);
+      const selected = value === presetSelect.value ? ' selected' : '';
+      return (
+        '<div class="menu-option' + selected + '" data-value="' + escapeHtml(value) + '">' +
+          '<span>' + escapeHtml(label) + '</span>' +
+          '<span>' + (selected ? '✓' : '') + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    const items = presetMenu.querySelectorAll('.menu-option[data-value]');
+    items.forEach((item) => {
+      item.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        const value = String(item.getAttribute('data-value') || '');
+        if (!value) return;
+        if (presetSelect.value !== value) {
+          presetSelect.value = value;
+          presetSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+        } else {
+          syncPresetMenuButton();
+        }
+        hidePresetMenu();
+      });
+    });
+  }
+
+  function normalizeFormatStyleIds(styleIds) {
+    const requested = new Set(
+      (Array.isArray(styleIds) ? styleIds : [])
+        .map((styleId) => String(styleId || '').trim()),
+    );
+    const normalized = FORMAT_STYLE_OPTIONS
+      .map((option) => option.id)
+      .filter((styleId) => requested.has(styleId));
+    return normalized.length > 0
+      ? normalized
+      : FORMAT_STYLE_OPTIONS.map((option) => option.id);
+  }
+
+  function selectedFormatStyleList() {
+    return normalizeFormatStyleIds(Array.from(selectedFormatStyles));
+  }
+
+  function styleMenuText() {
+    return 'Response formats (' + selectedFormatStyleList().length + ')';
+  }
+
+  function hideModelMenu() {
+    modelMenu.classList.add('hidden');
+  }
+
+  function hidePresetMenu() {
+    presetMenu.classList.add('hidden');
+  }
+
+  function hideStyleMenu() {
+    styleMenu.classList.add('hidden');
+  }
+
+  function hideAllMenus() {
+    hideModelMenu();
+    hidePresetMenu();
+    hideStyleMenu();
+  }
+
+  function showModelMenu() {
+    hideAllMenus();
+    modelMenu.classList.remove('hidden');
+  }
+
+  function showPresetMenu() {
+    hideAllMenus();
+    presetMenu.classList.remove('hidden');
+  }
+
+  function showStyleMenu() {
+    hideAllMenus();
+    styleMenu.classList.remove('hidden');
+  }
+
+  function toggleModelMenu() {
+    if (modelMenu.classList.contains('hidden')) {
+      showModelMenu();
+      return;
+    }
+    hideModelMenu();
+  }
+
+  function togglePresetMenu() {
+    if (presetMenu.classList.contains('hidden')) {
+      showPresetMenu();
+      return;
+    }
+    hidePresetMenu();
+  }
+
+  function toggleStyleMenu() {
+    if (styleMenu.classList.contains('hidden')) {
+      showStyleMenu();
+      return;
+    }
+    hideStyleMenu();
+  }
+
+  function syncStyleMenuButton() {
+    const label = styleMenuText();
+    if (styleMenuLabel) styleMenuLabel.textContent = label;
+    styleMenuBtn.setAttribute('aria-label', label);
+    styleMenuBtn.title = label;
+  }
+
+  function postFormatStylesChange() {
+    const styles = selectedFormatStyleList();
+    vscode.postMessage({ type: 'format-styles', value: styles });
+    renderStyleMenu();
+    syncStyleMenuButton();
+  }
+
+  function renderStyleMenu() {
+    const selected = new Set(selectedFormatStyleList());
+    styleMenu.innerHTML = FORMAT_STYLE_OPTIONS.map((option) => {
+      const checked = selected.has(option.id) ? ' checked' : '';
+      return (
+        '<label class="style-item" data-style-id="' + escapeHtml(option.id) + '">' +
+          '<input type="checkbox" data-style-id="' + escapeHtml(option.id) + '"' + checked + ' />' +
+          '<span>' + escapeHtml(option.label) + '</span>' +
+        '</label>'
+      );
+    }).join('');
+
+    const checkboxes = styleMenu.querySelectorAll('input[type="checkbox"][data-style-id]');
+    checkboxes.forEach((checkbox) => {
+      checkbox.addEventListener('change', () => {
+        const styleId = String(checkbox.getAttribute('data-style-id') || '').trim();
+        if (!styleId) return;
+
+        if (checkbox.checked) {
+          selectedFormatStyles.add(styleId);
+          postFormatStylesChange();
+          return;
+        }
+
+        selectedFormatStyles.delete(styleId);
+        if (selectedFormatStyles.size === 0) {
+          selectedFormatStyles.add(styleId);
+          checkbox.checked = true;
+          pushSystemEntry('At least one response format must stay enabled.', true);
+          return;
+        }
+        postFormatStylesChange();
+      });
+    });
+  }
+
+  function setFormatStylesFromExtension(styleIds) {
+    selectedFormatStyles = new Set(normalizeFormatStyleIds(styleIds));
+    renderStyleMenu();
+    syncStyleMenuButton();
+  }
+
   function parseSlashInput(rawValue) {
     const raw = String(rawValue || '').trim();
     if (!raw.startsWith('/')) return null;
@@ -1054,16 +1533,26 @@ export function getInlineHtml(
 
   function parseNumericSlashTargetInput(rawValue) {
     const trimmed = String(rawValue || '').trim();
-    const match = trimmed.match(/^\\/(\\d{1,2})(?:\\s+([\\s\\S]+))?$/);
-    if (!match) return null;
+    const slashPrefixMatch = trimmed.match(/^\\/(\\d{1,2})(?:\\s+([\\s\\S]+))?$/);
+    if (slashPrefixMatch) {
+      const index = Number(slashPrefixMatch[1]);
+      const target = targetByNumericIndex(index);
+      if (!target) return null;
+      const prompt = String(slashPrefixMatch[2] || '').trim();
+      if (!prompt) return { mode: 'select-only', index, target, prompt: '', token: '/' + String(index) };
+      return { mode: 'send', index, target, prompt, token: '/' + String(index) };
+    }
 
-    const index = Number(match[1]);
+    const slashSuffixMatch = trimmed.match(/^(\\d{1,2})\\/(?:\\s*([\\s\\S]+))?$/);
+    if (!slashSuffixMatch) return null;
+
+    const index = Number(slashSuffixMatch[1]);
     const target = targetByNumericIndex(index);
     if (!target) return null;
 
-    const prompt = String(match[2] || '').trim();
-    if (!prompt) return { mode: 'select-only', index, target, prompt: '' };
-    return { mode: 'send', index, target, prompt };
+    const prompt = String(slashSuffixMatch[2] || '').trim();
+    if (!prompt) return { mode: 'select-only', index, target, prompt: '', token: String(index) + '/' };
+    return { mode: 'send', index, target, prompt, token: String(index) + '/' };
   }
 
   function findSlashCommand(name) {
@@ -1194,7 +1683,7 @@ export function getInlineHtml(
         return 'keep';
       }
       modelSelect.value = option.value;
-      vscode.postMessage({ type: 'model', value: option.value });
+      modelSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
       pushSystemEntry('Model set to ' + option.label, false);
       return 'clear';
     }
@@ -1205,7 +1694,7 @@ export function getInlineHtml(
         return 'keep';
       }
       presetSelect.value = option.value;
-      vscode.postMessage({ type: 'preset', value: option.value });
+      presetSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
       pushSystemEntry('Preset set to ' + option.label, false);
       return 'clear';
     }
@@ -1262,6 +1751,8 @@ export function getInlineHtml(
     const options = filteredModelOptions();
     if (options.length === 0) {
       modelSelect.innerHTML = '';
+      renderModelMenu();
+      syncModelMenuButton();
       return;
     }
 
@@ -1274,6 +1765,8 @@ export function getInlineHtml(
     const nextModel = hasPreferred ? preferred : options[0].id || FALLBACK_MODEL_ID;
 
     modelSelect.value = nextModel;
+    renderModelMenu();
+    syncModelMenuButton();
 
     if (notifyOnFallback && !hasPreferred) {
       vscode.postMessage({ type: 'model', value: nextModel });
@@ -1316,7 +1809,7 @@ export function getInlineHtml(
     items.push({
       key: targetKey(newTarget),
       target: newTarget,
-      label: '1 New session (' + newProviderLabel + ')',
+      label: '/1 New session (' + newProviderLabel + ')',
       className: 'new-session',
     });
 
@@ -1332,7 +1825,7 @@ export function getInlineHtml(
       items.push({
         key: targetKey(target),
         target,
-        label: String(i + 2) + ' ' + targetLabelFromSession(session),
+        label: '/' + String(i + 2) + ' ' + targetLabelFromSession(session),
         className: session.agent === 'claude' ? 'claude' : 'codex',
       });
     }
@@ -1405,6 +1898,81 @@ export function getInlineHtml(
     });
   }
 
+  function cloneDispatchTarget(target) {
+    const kind = String(target && target.kind || '').trim();
+    if (kind === 'existing') {
+      return {
+        kind: 'existing',
+        agent: String(target.agent || '').toLowerCase() === 'claude' ? 'claude' : 'codex',
+        sessionId: String(target.sessionId || '').trim().toLowerCase(),
+        projectName: target.projectName,
+        sessionTitle: target.sessionTitle,
+      };
+    }
+    return {
+      kind: kind === 'new-claude' ? 'new-claude' : 'new-codex',
+    };
+  }
+
+  function targetAgent(target) {
+    if (target && target.kind === 'existing') {
+      return String(target.agent || '').toLowerCase() === 'claude' ? 'claude' : 'codex';
+    }
+    if (target && target.kind === 'new-claude') return 'claude';
+    if (target && target.kind === 'new-codex') return 'codex';
+    const provider = MODEL_PROVIDER[modelSelect.value] || 'openai';
+    return PROVIDER_AGENT[provider] === 'claude' ? 'claude' : 'codex';
+  }
+
+  function addLocalPromptEntry(target, promptText, timestamp) {
+    const agent = targetAgent(target);
+    const localSessionId = target.kind === 'existing'
+      ? String(target.sessionId || '').trim().toLowerCase()
+      : ('local-' + String(timestamp) + '-' + Math.random().toString(16).slice(2));
+    const localSessionTitle = target.kind === 'existing'
+      ? String(target.sessionTitle || '').trim()
+      : ('New ' + (agent === 'claude' ? 'Claude' : 'Codex') + ' session');
+
+    renderStaticEntry({
+      timestamp,
+      sessionId: localSessionId,
+      projectName: String(target.projectName || '').trim(),
+      sessionTitle: localSessionTitle,
+      agent,
+      source: 'you',
+      eventSummary: 'Prompt sent',
+      commentary: promptText,
+    });
+    highlightSelectedEntries();
+    scrollToBottom();
+  }
+
+  function postPromptDispatch(target, promptText) {
+    const prompt = String(promptText || '').trim();
+    if (!prompt) return;
+    const nextTarget = cloneDispatchTarget(target);
+    const pending = {
+      target: nextTarget,
+      prompt,
+      timestamp: Date.now(),
+    };
+    pendingDispatches.push(pending);
+
+    addLocalPromptEntry(nextTarget, prompt, pending.timestamp);
+
+    composerInput.value = '';
+    hideSlashMenu();
+    flushPendingActiveSessions();
+
+    vscode.postMessage({
+      type: 'dispatch-prompt',
+      value: {
+        target: nextTarget,
+        prompt,
+      },
+    });
+  }
+
   function submitComposer() {
     const raw = composerInput.value;
     const numericSlash = parseNumericSlashTargetInput(raw);
@@ -1412,20 +1980,13 @@ export function getInlineHtml(
       selectTargetSilently(numericSlash.target);
       vscode.postMessage({ type: 'set-target', value: numericSlash.target });
       if (numericSlash.mode === 'select-only') {
-        composerInput.value = '/' + String(numericSlash.index) + ' ';
+        composerInput.value = String(numericSlash.token || ('/' + String(numericSlash.index))) + ' ';
         composerInput.focus();
         hideSlashMenu();
         return;
       }
 
-      vscode.postMessage({
-        type: 'dispatch-prompt',
-        value: {
-          target: numericSlash.target,
-          prompt: numericSlash.prompt,
-        },
-      });
-      hideSlashMenu();
+      postPromptDispatch(numericSlash.target, numericSlash.prompt);
       return;
     }
 
@@ -1461,38 +2022,57 @@ export function getInlineHtml(
         return;
       }
 
-      vscode.postMessage({
-        type: 'dispatch-prompt',
-        value: {
-          target: numeric.target,
-          prompt: numeric.prompt,
-        },
-      });
-      hideSlashMenu();
+      postPromptDispatch(numeric.target, numeric.prompt);
       return;
     }
 
     const prompt = String(raw || '').trim();
     if (!prompt) return;
 
-    const payload = {
-      type: 'dispatch-prompt',
-      value: {
-        target: selectedTarget,
-        prompt,
-      },
-    };
-    vscode.postMessage(payload);
-    hideSlashMenu();
+    postPromptDispatch(selectedTarget, prompt);
   }
 
   modelSelect.addEventListener('change', () => {
     vscode.postMessage({ type: 'model', value: modelSelect.value });
+    renderModelMenu();
+    syncModelMenuButton();
     syncTargetBadges();
   });
 
   presetSelect.addEventListener('change', () => {
     vscode.postMessage({ type: 'preset', value: presetSelect.value });
+    renderPresetMenu();
+    syncPresetMenuButton();
+  });
+
+  modelMenuBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleModelMenu();
+  });
+
+  modelMenu.addEventListener('mousedown', (event) => {
+    event.stopPropagation();
+  });
+
+  presetMenuBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    togglePresetMenu();
+  });
+
+  presetMenu.addEventListener('mousedown', (event) => {
+    event.stopPropagation();
+  });
+
+  styleMenuBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleStyleMenu();
+  });
+
+  styleMenu.addEventListener('mousedown', (event) => {
+    event.stopPropagation();
   });
 
   pauseBtn.addEventListener('click', () => {
@@ -1501,11 +2081,12 @@ export function getInlineHtml(
 
   composerInput.addEventListener('input', () => {
     const numericSlash = parseNumericSlashTargetInput(composerInput.value);
-    if (numericSlash && numericSlash.mode === 'select-only') {
+    if (numericSlash) {
       selectTargetSilently(numericSlash.target);
       vscode.postMessage({ type: 'set-target', value: numericSlash.target });
     }
     updateSlashMenu();
+    flushPendingActiveSessions();
   });
 
   composerInput.addEventListener('keydown', (event) => {
@@ -1546,6 +2127,16 @@ export function getInlineHtml(
 
   composerInput.addEventListener('blur', () => {
     setTimeout(() => hideSlashMenu(), 100);
+    flushPendingActiveSessions();
+  });
+
+  document.addEventListener('mousedown', (event) => {
+    const eventTarget = event && event.target;
+    const target = eventTarget && eventTarget.nodeType === 1
+      ? eventTarget.closest('.menu-host')
+      : null;
+    if (target) return;
+    hideAllMenus();
   });
 
   feed.addEventListener('click', (event) => {
@@ -1573,6 +2164,9 @@ export function getInlineHtml(
   });
 
   refreshPauseButton();
+  setFormatStylesFromExtension(INITIAL_FORMAT_STYLES);
+  renderPresetMenu();
+  syncPresetMenuButton();
   refreshModelOptions(modelSelect.value, false);
   syncTargetBadges();
 
@@ -1690,6 +2284,13 @@ export function getInlineHtml(
 
     if (msg.type === 'set-preset') {
       presetSelect.value = msg.value || 'auto';
+      renderPresetMenu();
+      syncPresetMenuButton();
+      return;
+    }
+
+    if (msg.type === 'set-format-styles') {
+      setFormatStylesFromExtension(msg.value || []);
       return;
     }
 
@@ -1714,9 +2315,7 @@ export function getInlineHtml(
     }
 
     if (msg.type === 'active-sessions') {
-      activeSessions = Array.isArray(msg.value) ? msg.value.slice() : [];
-      sessionsEl.textContent = activeSessions.length + ' session' + (activeSessions.length === 1 ? '' : 's');
-      syncTargetBadges();
+      queueOrApplyActiveSessions(msg.value);
       return;
     }
 
@@ -1730,12 +2329,15 @@ export function getInlineHtml(
     if (msg.type === 'dispatch-status') {
       const status = msg.value || {};
       const state = String(status.state || '').toLowerCase();
-      const message = String(status.message || 'Dispatch update');
-      const isError = state === 'failed';
-      pushSystemEntry('[' + state + '] ' + message, isError);
-      if (state === 'sent') {
-        composerInput.value = '';
-        hideSlashMenu();
+      if (state === 'sent' || state === 'failed') {
+        const pending = pendingDispatches.length > 0 ? pendingDispatches.shift() : null;
+        if (state === 'failed' && pending && !String(composerInput.value || '').trim()) {
+          composerInput.value = pending.prompt;
+        }
+      }
+      if (state === 'failed') {
+        const message = String(status.message || 'Dispatch failed');
+        pushSystemEntry(message, true);
       }
     }
   });

@@ -1,9 +1,10 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { MODELS, ModelId } from '../core/types'
+import { COMMENTARY_STYLE_OPTIONS, CommentaryStyleId, MODELS, ModelId } from '../core/types'
 
 export const MODEL_STATE_FILENAME = 'kibitz.model'
 export const PRESET_STATE_FILENAME = 'kibitz.preset'
+export const FORMAT_STYLES_STATE_FILENAME = 'kibitz.format-styles'
 
 export function isValidModelId(value: string): value is ModelId {
   return MODELS.some(model => model.id === value)
@@ -44,6 +45,17 @@ export function persistPreset(storageDir: string, preset: string): void {
   writeStateValue(storageDir, PRESET_STATE_FILENAME, preset)
 }
 
+export function persistFormatStyles(storageDir: string, styleIds: readonly CommentaryStyleId[]): void {
+  const allStyleIds = new Set(COMMENTARY_STYLE_OPTIONS.map((option) => option.id))
+  const normalized: CommentaryStyleId[] = []
+  for (const styleId of styleIds) {
+    if (!allStyleIds.has(styleId)) continue
+    if (normalized.includes(styleId)) continue
+    normalized.push(styleId)
+  }
+  writeStateValue(storageDir, FORMAT_STYLES_STATE_FILENAME, JSON.stringify(normalized))
+}
+
 export function readPersistedModel(storageDir: string, fallback?: ModelId): ModelId | undefined {
   const diskModel = readStateValue(storageDir, MODEL_STATE_FILENAME)
   if (diskModel && isValidModelId(diskModel)) return diskModel
@@ -56,4 +68,37 @@ export function readPersistedModel(storageDir: string, fallback?: ModelId): Mode
 
 export function readPersistedPreset(storageDir: string, fallback = 'auto'): string {
   return readStateValue(storageDir, PRESET_STATE_FILENAME) || fallback
+}
+
+export function readPersistedFormatStyles(
+  storageDir: string,
+  fallback?: readonly CommentaryStyleId[],
+): CommentaryStyleId[] {
+  const known = new Set(COMMENTARY_STYLE_OPTIONS.map((option) => option.id))
+  const raw = readStateValue(storageDir, FORMAT_STYLES_STATE_FILENAME)
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const valid = parsed
+          .map((value) => String(value || '').trim() as CommentaryStyleId)
+          .filter((value): value is CommentaryStyleId => known.has(value))
+        if (valid.length > 0) return valid
+      }
+    } catch {
+      // Ignore malformed saved state.
+    }
+  }
+
+  if (fallback && fallback.length > 0) {
+    const deduped: CommentaryStyleId[] = []
+    for (const value of fallback) {
+      if (!known.has(value)) continue
+      if (deduped.includes(value)) continue
+      deduped.push(value)
+    }
+    if (deduped.length > 0) return deduped
+  }
+
+  return COMMENTARY_STYLE_OPTIONS.map((option) => option.id)
 }

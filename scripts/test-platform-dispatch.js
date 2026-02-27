@@ -72,7 +72,7 @@ function testExistingDispatchArgs() {
   assertEqual(claude.command, 'claude.cmd', 'claude existing dispatch should use claude.cmd on win32');
   assertArrayEqual(
     claude.args,
-    ['-p', 'Fix unclear prompt', '--output-format', 'stream-json', '--resume', 'claude-session'],
+    ['-p', 'Fix unclear prompt', '--verbose', '--output-format', 'stream-json', '--resume', 'claude-session'],
     'claude existing dispatch args mismatch',
   );
 }

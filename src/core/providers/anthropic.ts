@@ -5,6 +5,7 @@ import { homedir } from 'os'
 import { Provider, ModelId } from '../types'
 
 let cachedClaudePath: string | null = null
+const PROVIDER_TIMEOUT_MS = 90_000
 
 /**
  * On Windows, .cmd wrappers from npm have 8191-char limit.
@@ -155,6 +156,7 @@ export class AnthropicProvider implements Provider {
       let full = ''
       let buffer = ''
       let stderr = ''
+      let timedOut = false
 
       proc.stdout.on('data', (data: Buffer) => {
         buffer += data.toString()
@@ -193,7 +195,17 @@ export class AnthropicProvider implements Provider {
         stderr += data.toString()
       })
 
+      const timeout = setTimeout(() => {
+        timedOut = true
+        try { proc.kill() } catch {}
+      }, PROVIDER_TIMEOUT_MS)
+
       proc.on('close', (code) => {
+        clearTimeout(timeout)
+        if (timedOut && !full) {
+          reject(new Error(`Claude CLI timed out after ${PROVIDER_TIMEOUT_MS}ms`))
+          return
+        }
         if (code !== 0 && !full) {
           reject(new Error(`Claude CLI exited with code ${code}: ${stderr.slice(0, 500)}`))
         } else {
@@ -202,13 +214,9 @@ export class AnthropicProvider implements Provider {
       })
 
       proc.on('error', (err) => {
+        clearTimeout(timeout)
         reject(new Error(`Claude CLI error: ${err.message}`))
       })
-
-      // 60s timeout for commentary generation
-      setTimeout(() => {
-        try { proc.kill() } catch {}
-      }, 60_000)
     })
   }
 }

@@ -154,7 +154,11 @@ export class SessionWatcher extends EventEmitter {
       if (codexProject) resolvedProjectName = codexProject
     }
 
-    const sessionId = deriveSessionId(filePath, agent)
+    const sessionId = extractSessionIdFromLog(
+      filePath,
+      agent,
+      deriveSessionId(filePath, agent),
+    )
     const ignore = agent === 'codex' && isKibitzInternalCodexSession(filePath)
     const sessionTitle = extractSessionTitle(filePath, agent, sessionId)
     const entry: WatchedFile = {
@@ -236,6 +240,12 @@ export class SessionWatcher extends EventEmitter {
       }
 
       for (const event of events) {
+        const normalizedEventSessionId = normalizeSessionId(event.sessionId, entry.agent)
+        if (normalizedEventSessionId && normalizedEventSessionId !== entry.sessionId) {
+          entry.sessionId = normalizedEventSessionId
+        }
+        event.sessionId = entry.sessionId
+
         // Override source detection
         event.source = this.detectSource(entry)
         event.sessionTitle = entry.sessionTitle || fallbackSessionTitle(entry.projectName, entry.agent)
@@ -606,6 +616,54 @@ function deriveSessionId(filePath: string, agent: 'claude' | 'codex'): string {
 
   const match = basename.match(/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i)
   return match ? match[1].toLowerCase() : basename.toLowerCase()
+}
+
+function normalizeSessionId(
+  rawSessionId: unknown,
+  agent: 'claude' | 'codex',
+): string {
+  const value = String(rawSessionId || '').trim()
+  if (!value) return ''
+  if (agent === 'codex') return value.toLowerCase()
+  return value
+}
+
+function extractSessionIdFromLog(
+  filePath: string,
+  agent: 'claude' | 'codex',
+  fallback: string,
+): string {
+  const normalizedFallback = normalizeSessionId(fallback, agent)
+  if (agent !== 'claude') return normalizedFallback
+
+  try {
+    const stat = fs.statSync(filePath)
+    const length = Math.min(stat.size, 512 * 1024)
+    if (length <= 0) return normalizedFallback
+
+    const fd = fs.openSync(filePath, 'r')
+    try {
+      const buf = Buffer.alloc(length)
+      const offset = Math.max(0, stat.size - length)
+      fs.readSync(fd, buf, 0, length, offset)
+      const lines = buf.toString('utf8').split('\n').filter((line) => line.trim())
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        try {
+          const obj: any = JSON.parse(lines[i])
+          const fromLine = normalizeSessionId(obj?.sessionId, agent)
+          if (fromLine) return fromLine
+        } catch {
+          // ignore malformed line
+        }
+      }
+    } finally {
+      fs.closeSync(fd)
+    }
+  } catch {
+    // ignore unreadable session log
+  }
+
+  return normalizedFallback
 }
 
 function pickSessionTitle(raw: string): string | undefined {

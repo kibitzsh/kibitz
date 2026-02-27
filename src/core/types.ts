@@ -43,6 +43,32 @@ export interface DispatchStatus {
   timestamp: number
 }
 
+export type CommentaryStyleId =
+  | 'bullets'
+  | 'one-liner'
+  | 'headline-context'
+  | 'numbered-progress'
+  | 'short-question'
+  | 'table'
+  | 'emoji-bullets'
+  | 'scoreboard'
+
+export interface CommentaryStyleOption {
+  id: CommentaryStyleId
+  label: string
+}
+
+export const COMMENTARY_STYLE_OPTIONS: CommentaryStyleOption[] = [
+  { id: 'bullets', label: 'Bullet list' },
+  { id: 'one-liner', label: 'One-liner' },
+  { id: 'headline-context', label: 'Headline + context' },
+  { id: 'numbered-progress', label: 'Numbered progress' },
+  { id: 'short-question', label: 'Short + question' },
+  { id: 'table', label: 'Table' },
+  { id: 'emoji-bullets', label: 'Emoji bullets' },
+  { id: 'scoreboard', label: 'Scoreboard' },
+]
+
 export type ModelId =
   | 'claude-opus-4-6'
   | 'claude-sonnet-4-6'

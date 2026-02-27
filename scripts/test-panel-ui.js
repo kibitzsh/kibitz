@@ -89,6 +89,8 @@ async function main() {
     const targetBadges = document.getElementById('target-badges');
     const composerInput = document.getElementById('composer-input');
     const composerSend = document.getElementById('composer-send');
+    const styleMenuBtn = document.getElementById('style-menu-btn');
+    const styleMenu = document.getElementById('style-menu');
     const modelSelect = document.getElementById('model-select');
     const sessionsBadge = document.getElementById('sessions');
     const feed = document.getElementById('feed');
@@ -96,6 +98,8 @@ async function main() {
     assert(targetBadges, 'target badges should exist');
     assert(composerInput, 'composer input should exist');
     assert(composerSend, 'composer send should exist');
+    assert(styleMenuBtn, 'style menu button should exist');
+    assert(styleMenu, 'style menu should exist');
     assert(modelSelect, 'model select should exist');
 
     function badgeTexts() {
@@ -112,7 +116,25 @@ async function main() {
     // New-session badge should exist and reflect current model provider.
     const initialBadges = badgeTexts();
     assert(initialBadges.length >= 1, 'should render at least one target badge');
-    assert(initialBadges[0].includes('1 New session (Codex)'), 'first badge should be new codex session for GPT model');
+    assert(initialBadges[0].includes('/1 New session (Codex)'), 'first badge should be new codex session for GPT model');
+    assert((styleMenuBtn.textContent || '').includes('(8)'), 'style menu button should show default style count');
+
+    // Style dropdown should emit selected style ids.
+    posted.length = 0;
+    styleMenuBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await tick();
+    const tableStyle = styleMenu.querySelector('input[data-style-id="table"]');
+    assert(tableStyle, 'table style checkbox should exist');
+    tableStyle.checked = false;
+    tableStyle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await tick();
+    const stylesMsg = lastPosted(posted, 'format-styles');
+    assert(stylesMsg, 'changing style checkbox should emit format-styles');
+    assert(!stylesMsg.value.includes('table'), 'disabled style should be omitted from format-styles message');
+
+    sendWindowMessage(window, { type: 'set-format-styles', value: ['bullets', 'table'] });
+    await tick();
+    assert((styleMenuBtn.textContent || '').includes('(2)'), 'style menu button should reflect extension-updated style count');
 
     const activeSessions = [
       {
@@ -142,12 +164,45 @@ async function main() {
     assert.strictEqual(sessionsBadge.textContent.trim(), '2 sessions', 'sessions badge should match active session count');
 
     const sessionBadges = badgeTexts();
-    assert(sessionBadges.some((text) => text.includes('2 ') && text.includes('CODEX')), 'badges should include codex existing session');
-    assert(sessionBadges.some((text) => text.includes('3 ') && text.includes('CLAUDE')), 'badges should include claude existing session');
+    assert(sessionBadges.some((text) => text.includes('/2 ') && text.includes('CODEX')), 'badges should include codex existing session');
+    assert(sessionBadges.some((text) => text.includes('/3 ') && text.includes('CLAUDE')), 'badges should include claude existing session');
+
+    // While user is typing, active-session refresh must not reorder badges or counter.
+    composerInput.value = 'draft in progress';
+    composerInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    const badgesBeforeTypingRefresh = badgeTexts();
+    assert.strictEqual(sessionsBadge.textContent.trim(), '2 sessions', 'precondition: counter should still be 2');
+
+    sendWindowMessage(window, {
+      type: 'active-sessions',
+      value: [
+        {
+          id: 'ccccdddd-eeee-ffff-aaaa-bbbbbbbbbbbb',
+          projectName: 'room',
+          sessionTitle: 'New live session',
+          agent: 'codex',
+          source: 'cli',
+          filePath: '/tmp/new-codex.jsonl',
+          lastActivity: Date.now() + 5000,
+        },
+        activeSessions[1],
+        activeSessions[0],
+      ],
+    });
+    await tick();
+    assert.strictEqual(sessionsBadge.textContent.trim(), '2 sessions', 'counter should stay frozen while typing');
+    assert.deepStrictEqual(badgeTexts(), badgesBeforeTypingRefresh, 'badge ordering should stay frozen while typing');
+
+    composerInput.value = '';
+    composerInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    composerInput.dispatchEvent(new window.Event('blur'));
+    await tick();
+    assert.strictEqual(sessionsBadge.textContent.trim(), '3 sessions', 'counter should update after typing stops');
+    assert(badgeTexts().some((text) => text.includes('/4 ') && text.includes('New live session')), 'new session badge should appear after typing stops');
 
     // Clicking the #1 badge should target new codex session initially.
     posted.length = 0;
-    clickBadgeByText('1 New session (Codex)');
+    clickBadgeByText('/1 New session (Codex)');
     await tick();
 
     const codexTargetMsg = lastPosted(posted, 'set-target');
@@ -165,7 +220,7 @@ async function main() {
     assert.strictEqual(modelMsg.value, 'claude-opus-4-6', 'model payload should match selected value');
 
     const badgesAfterModelSwitch = badgeTexts();
-    assert(badgesAfterModelSwitch[0].includes('1 New session (Claude)'), 'first badge should switch to new claude session');
+    assert(badgesAfterModelSwitch[0].includes('/1 New session (Claude)'), 'first badge should switch to new claude session');
     assert(!badgesAfterModelSwitch.some((text) => text.includes('New session (Codex)')), 'should not show second-provider new-session badge');
 
     // Model list still contains all models.
@@ -193,6 +248,12 @@ async function main() {
     assert.strictEqual(dispatchMsg.value.prompt, 'Fix unclear prompt', 'dispatch prompt should match input');
     assert.strictEqual(dispatchMsg.value.target.kind, 'existing', 'dispatch target should be existing session');
     assert.strictEqual(dispatchMsg.value.target.agent, 'codex', 'dispatch target agent should be codex');
+    assert.strictEqual(composerInput.value, '', 'composer should clear immediately after dispatch submit');
+    const optimisticEntry = Array.from(feed.querySelectorAll('.entry')).slice(-1)[0];
+    assert(optimisticEntry, 'plain text send should render optimistic local entry');
+    const optimisticText = optimisticEntry.textContent || '';
+    assert(optimisticText.includes('[you]'), 'optimistic entry should be marked as local user source');
+    assert(optimisticText.includes('Fix unclear prompt'), 'optimistic entry should include submitted prompt text');
     assert.strictEqual(document.body.classList.contains('show-event-summary'), false, 'event summary should be hidden by default');
 
     // Slash commands via input composer should map to control messages.
@@ -266,7 +327,39 @@ async function main() {
     assert(clickTargetMsg, 'clicking entry should emit set-target');
     assert.strictEqual(clickTargetMsg.value.sessionId, '019c9c16-f1db-7f51-8a5d-c41b7447eab4', 'clicked session id should match set-target payload');
 
-    // Failed status must preserve input; sent status clears it.
+    // Failed status must preserve input; sent status must not wipe new typing.
+    const statusEntriesBefore = feed.querySelectorAll('.system-entry, .error-entry').length;
+    sendWindowMessage(window, {
+      type: 'dispatch-status',
+      value: {
+        state: 'queued',
+        message: 'queued message',
+        timestamp: Date.now(),
+        target: { kind: 'existing', agent: 'codex', sessionId: '019c9c16-f1db-7f51-8a5d-c41b7447eab4' },
+      },
+    });
+    sendWindowMessage(window, {
+      type: 'dispatch-status',
+      value: {
+        state: 'started',
+        message: 'started message',
+        timestamp: Date.now(),
+        target: { kind: 'existing', agent: 'codex', sessionId: '019c9c16-f1db-7f51-8a5d-c41b7447eab4' },
+      },
+    });
+    sendWindowMessage(window, {
+      type: 'dispatch-status',
+      value: {
+        state: 'sent',
+        message: 'sent message',
+        timestamp: Date.now(),
+        target: { kind: 'existing', agent: 'codex', sessionId: '019c9c16-f1db-7f51-8a5d-c41b7447eab4' },
+      },
+    });
+    await tick();
+    const statusEntriesAfter = feed.querySelectorAll('.system-entry, .error-entry').length;
+    assert.strictEqual(statusEntriesAfter, statusEntriesBefore, 'queued/started/sent statuses should not create feed entries');
+
     composerInput.value = 'keep me for retry';
     sendWindowMessage(window, {
       type: 'dispatch-status',
@@ -279,6 +372,8 @@ async function main() {
     });
     await tick();
     assert.strictEqual(composerInput.value, 'keep me for retry', 'failed dispatch should keep composer text');
+    const statusEntriesAfterFailed = feed.querySelectorAll('.system-entry, .error-entry').length;
+    assert.strictEqual(statusEntriesAfterFailed, statusEntriesBefore + 1, 'failed status should create one feed entry');
 
     sendWindowMessage(window, {
       type: 'dispatch-status',
@@ -290,7 +385,7 @@ async function main() {
       },
     });
     await tick();
-    assert.strictEqual(composerInput.value, '', 'sent dispatch should clear composer text');
+    assert.strictEqual(composerInput.value, 'keep me for retry', 'sent dispatch should not clear composer if user already typed new text');
 
     // Slash numeric-only input should select target without dispatch and clear command text.
     posted.length = 0;
@@ -324,6 +419,24 @@ async function main() {
     assert(slashTypingTarget, 'typing /2 should immediately emit set-target');
     assert.strictEqual(slashTypingTarget.value.kind, 'existing', 'typing /2 should target existing badge');
     assert(!lastPosted(posted, 'dispatch-prompt'), 'typing /2 should not dispatch prompt');
+
+    // Typing slash numeric with prompt should also immediately retarget.
+    posted.length = 0;
+    composerInput.value = '/2 please continue';
+    composerInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await tick();
+    const slashTypingWithPromptTarget = lastPosted(posted, 'set-target');
+    assert(slashTypingWithPromptTarget, 'typing /2 with prompt should emit set-target');
+    assert.strictEqual(slashTypingWithPromptTarget.value.kind, 'existing', 'typing /2 with prompt should target existing badge');
+
+    // Typing suffix form (2/) should also immediately retarget.
+    posted.length = 0;
+    composerInput.value = '2/';
+    composerInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await tick();
+    const slashSuffixTypingTarget = lastPosted(posted, 'set-target');
+    assert(slashSuffixTypingTarget, 'typing 2/ should immediately emit set-target');
+    assert.strictEqual(slashSuffixTypingTarget.value.kind, 'existing', 'typing 2/ should target existing badge');
 
     // Numeric-only input should select target without dispatch and keep shortcut token.
     posted.length = 0;

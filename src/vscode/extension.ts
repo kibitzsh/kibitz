@@ -1,4 +1,5 @@
 import * as vscode from 'vscode'
+import { spawn } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -6,6 +7,8 @@ import { SessionWatcher } from '../core/watcher'
 import { CommentaryEngine } from '../core/commentary'
 import { KibitzPanel } from './panel'
 import {
+  COMMENTARY_STYLE_OPTIONS,
+  CommentaryStyleId,
   DispatchRequest,
   DispatchTarget,
   KeyResolver,
@@ -17,13 +20,19 @@ import {
 import { checkClaudeCliAvailable } from '../core/providers/anthropic'
 import { checkCodexCliAvailable } from '../core/providers/openai'
 import {
+  persistFormatStyles,
   persistModel,
   persistPreset,
+  readPersistedFormatStyles,
   readPersistedModel,
   readPersistedPreset,
 } from './persistence'
 import { inheritShellPath, SessionProvider } from '../core/platform-support'
-import { SessionDispatchService } from '../core/session-dispatch'
+import {
+  buildInteractiveDispatchCommand,
+  resolveDispatchCommand,
+  SessionDispatchService,
+} from '../core/session-dispatch'
 
 let watcher: SessionWatcher | undefined
 let engine: CommentaryEngine | undefined
@@ -74,40 +83,177 @@ function postActiveSessions(): void {
   panel.updateActiveSessions(watcher.getActiveSessions())
 }
 
-function quoteArg(value: string): string {
-  const safe = String(value || '').replace(/"/g, '\\"')
-  return `"${safe}"`
+function normalizeErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  return String(error || 'Unknown error')
 }
 
-async function launchInteractiveFromPanel(
-  context: vscode.ExtensionContext,
+function formatProviderLabel(provider: SessionProvider): string {
+  return provider === 'claude' ? 'Claude' : 'Codex'
+}
+
+function quotePosix(value: string): string {
+  return `'${String(value || '').replace(/'/g, `'\"'\"'`)}'`
+}
+
+function quotePowerShell(value: string): string {
+  return `'${String(value || '').replace(/'/g, "''")}'`
+}
+
+async function spawnAndWait(command: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: false,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: false,
+    })
+    let stderr = ''
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      stderr += String(chunk || '')
+    })
+    child.once('error', (error) => {
+      reject(error)
+    })
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve()
+        return
+      }
+      const message = stderr.trim() || `${command} exited with code ${code}`
+      reject(new Error(message))
+    })
+  })
+}
+
+function buildMacCommandScript(command: string, args: string[]): string {
+  const cmdLine = [command, ...args]
+    .map((arg) => quotePosix(arg))
+    .join(' ')
+
+  return [
+    '#!/bin/zsh',
+    cmdLine,
+    'status=$?',
+    'echo',
+    'if [ "$status" -ne 0 ]; then',
+    '  echo "Command failed with exit code $status"',
+    'fi',
+    'exec $SHELL -l',
+  ].join('\n')
+}
+
+function buildMacCommandScriptWithMarker(
+  command: string,
+  args: string[],
+  markerPath: string,
+): string {
+  const marker = quotePosix(markerPath)
+  return [
+    '#!/bin/zsh',
+    `echo "started $(date +%s)" > ${marker}`,
+    buildMacCommandScript(command, args),
+  ].join('\n')
+}
+
+async function waitForFile(filePath: string, timeoutMs: number): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt <= timeoutMs) {
+    if (fs.existsSync(filePath)) return true
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  return false
+}
+
+function escapeAppleScriptText(value: string): string {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+async function launchExternalTerminalWindow(
   provider: SessionProvider,
   prompt: string,
 ): Promise<void> {
-  const launcherPath = path.join(context.extensionPath, 'dist', 'vscode', 'interactive-launcher.js')
-  if (!fs.existsSync(launcherPath)) {
-    throw new Error(`Interactive launcher not found at ${launcherPath}. Run build first.`)
+  const command = buildInteractiveDispatchCommand(provider, prompt)
+  const resolved = resolveDispatchCommand(command)
+
+  if (process.platform === 'darwin') {
+    const markerPath = path.join(
+      os.tmpdir(),
+      `kibitz-${provider}-${Date.now()}-${Math.random().toString(16).slice(2)}.started`,
+    )
+    const scriptPath = path.join(
+      os.tmpdir(),
+      `kibitz-${provider}-${Date.now()}-${Math.random().toString(16).slice(2)}.command`,
+    )
+    const scriptBody = buildMacCommandScriptWithMarker(resolved.command, resolved.args, markerPath)
+    fs.writeFileSync(scriptPath, scriptBody, { encoding: 'utf8', mode: 0o755 })
+
+    await spawnAndWait('open', ['-a', 'Terminal', scriptPath])
+    let launched = await waitForFile(markerPath, 6000)
+    if (!launched) {
+      const escapedScriptPath = escapeAppleScriptText(scriptPath)
+      await spawnAndWait('osascript', [
+        '-e',
+        'tell application "Terminal" to activate',
+        '-e',
+        `tell application "Terminal" to do script "zsh " & quoted form of "${escapedScriptPath}"`,
+      ])
+      launched = await waitForFile(markerPath, 6000)
+    }
+
+    if (!launched) {
+      throw new Error('Terminal did not execute launcher script')
+    }
+
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(scriptPath)
+      } catch {
+        // Best-effort cleanup.
+      }
+      try {
+        fs.unlinkSync(markerPath)
+      } catch {
+        // Best-effort cleanup.
+      }
+    }, 5 * 60 * 1000)
+    return
   }
 
-  const promptFile = path.join(
-    os.tmpdir(),
-    `kibitz-${provider}-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
+  if (process.platform === 'win32') {
+    const argList = resolved.args.map((arg) => quotePowerShell(arg)).join(', ')
+    const psScript = [
+      "$ErrorActionPreference='Stop'",
+      `Start-Process -WindowStyle Normal -FilePath ${quotePowerShell(resolved.command)} -ArgumentList @(${argList})`,
+    ].join('; ')
+
+    await spawnAndWait('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      psScript,
+    ])
+    return
+  }
+
+  // Linux is best-effort in this project.
+  await spawnAndWait('x-terminal-emulator', ['-e', resolved.command, ...resolved.args])
+}
+
+async function launchInteractiveFromPanel(
+  provider: SessionProvider,
+  prompt: string,
+): Promise<void> {
+  try {
+    await launchExternalTerminalWindow(provider, prompt)
+  } catch (error) {
+    throw new Error(`Failed to open external ${formatProviderLabel(provider)} terminal: ${normalizeErrorMessage(error)}`)
+  }
+
+  void vscode.window.setStatusBarMessage(
+    `Kibitz: opened ${formatProviderLabel(provider)} in external terminal window.`,
+    6000,
   )
-  fs.writeFileSync(promptFile, prompt, 'utf8')
-
-  const terminal = vscode.window.createTerminal({ name: `Kibitz ${provider}` })
-  const command = `${quoteArg(process.execPath)} ${quoteArg(launcherPath)} --provider ${provider} --prompt-file ${quoteArg(promptFile)}`
-  terminal.show(true)
-  terminal.sendText(command, true)
-
-  // Best-effort cleanup; launcher reads immediately at process start.
-  setTimeout(() => {
-    try {
-      fs.unlinkSync(promptFile)
-    } catch {
-      // Ignore cleanup errors.
-    }
-  }, 90_000)
 }
 
 function ensureRuntime(context: vscode.ExtensionContext): void {
@@ -120,7 +266,7 @@ function ensureRuntime(context: vscode.ExtensionContext): void {
   engine = new CommentaryEngine(noopKeyResolver)
   dispatchService = new SessionDispatchService({
     getActiveSessions: () => watcher?.getActiveSessions() || [],
-    launchInteractiveSession: (provider, prompt) => launchInteractiveFromPanel(context, provider, prompt),
+    launchInteractiveSession: (provider, prompt) => launchInteractiveFromPanel(provider, prompt),
   })
 
   watcher.on('event', (event) => {
@@ -138,6 +284,12 @@ function ensureRuntime(context: vscode.ExtensionContext): void {
     context.globalState.update('kibitz.preset', preset)
     persistPreset(context.globalStorageUri.fsPath, preset)
     panel?.updatePreset(preset)
+  })
+
+  engine.on('format-styles-changed', (styleIds: CommentaryStyleId[]) => {
+    context.globalState.update('kibitz.formatStyles', styleIds)
+    persistFormatStyles(context.globalStorageUri.fsPath, styleIds)
+    panel?.updateFormatStyles(styleIds)
   })
 
   engine.on('commentary-start', (entry) => {
@@ -205,6 +357,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       )
       if (engine!.getPreset() !== savedPreset) {
         engine!.setPreset(savedPreset)
+      }
+
+      const fallbackStyles = context.globalState.get<CommentaryStyleId[]>(
+        'kibitz.formatStyles',
+        COMMENTARY_STYLE_OPTIONS.map((option) => option.id),
+      )
+      const savedFormatStyles = readPersistedFormatStyles(context.globalStorageUri.fsPath, fallbackStyles)
+      const currentFormatStyles = engine!.getFormatStyles()
+      const sameFormatStyles = savedFormatStyles.length === currentFormatStyles.length
+        && savedFormatStyles.every((styleId, index) => styleId === currentFormatStyles[index])
+      if (!sameFormatStyles) {
+        engine!.setFormatStyles(savedFormatStyles)
       }
 
       const providers = detectProviders()

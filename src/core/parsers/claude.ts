@@ -47,8 +47,8 @@ function summarizeToolUse(name: string, input: Record<string, unknown>): string 
 }
 
 function shortPath(p: string): string {
-  const parts = p.split('/')
-  if (parts.length <= 3) return p
+  const parts = String(p || '').split(/[\\/]+/).filter(Boolean)
+  if (parts.length <= 3) return String(p || '')
   return '.../' + parts.slice(-2).join('/')
 }
 
@@ -57,7 +57,7 @@ function truncate(s: string, max: number): string {
 }
 
 function projectNameFromCwd(cwd: string): string {
-  const parts = cwd.split('/')
+  const parts = String(cwd || '').split(/[\\/]+/).filter(Boolean)
   return parts[parts.length - 1] || 'unknown'
 }
 
@@ -134,14 +134,17 @@ export function parseClaudeLine(line: string, filePath: string): KibitzEvent[] {
 
 function projectFromFilePath(filePath: string): string {
   // ~/.claude/projects/-Users-vasily-projects-room/session.jsonl
-  const parts = filePath.split('/')
-  const projectDir = parts[parts.length - 2] || ''
+  const segments = String(filePath || '').split(/[\\/]+/).filter(Boolean)
+  const projectDir = segments.length >= 2 ? segments[segments.length - 2] : ''
   // Convert -Users-vasily-projects-room → room
-  const segments = projectDir.split('-').filter(Boolean)
-  return segments[segments.length - 1] || 'unknown'
+  const projectSegments = projectDir.split('-').filter(Boolean)
+  return projectSegments[projectSegments.length - 1] || 'unknown'
 }
 
 function sessionIdFromFilePath(filePath: string): string {
-  const basename = filePath.split('/').pop() || ''
-  return basename.replace('.jsonl', '')
+  return String(filePath || '')
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .pop()
+    ?.replace(/\.jsonl$/i, '') || ''
 }

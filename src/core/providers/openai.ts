@@ -6,6 +6,7 @@ import { Provider, ModelId } from '../types'
 
 let cachedCodexScript: string | null = null
 let codexScriptResolved = false
+const PROVIDER_TIMEOUT_MS = 90_000
 
 /**
  * On Windows, resolve codex.cmd → underlying .js script to bypass cmd.exe limits.
@@ -83,6 +84,7 @@ export class OpenAIProvider implements Provider {
       let full = ''
       let buffer = ''
       let stderr = ''
+      let timedOut = false
 
       proc.stdout.on('data', (data: Buffer) => {
         buffer += data.toString()
@@ -108,7 +110,17 @@ export class OpenAIProvider implements Provider {
         stderr += data.toString()
       })
 
+      const timeout = setTimeout(() => {
+        timedOut = true
+        try { proc.kill() } catch {}
+      }, PROVIDER_TIMEOUT_MS)
+
       proc.on('close', (code) => {
+        clearTimeout(timeout)
+        if (timedOut && !full) {
+          reject(new Error(`Codex CLI timed out after ${PROVIDER_TIMEOUT_MS}ms`))
+          return
+        }
         if (code !== 0 && !full) {
           reject(new Error(`Codex CLI exited with code ${code}: ${stderr.slice(0, 500)}`))
         } else {
@@ -117,13 +129,9 @@ export class OpenAIProvider implements Provider {
       })
 
       proc.on('error', (err) => {
+        clearTimeout(timeout)
         reject(new Error(`Codex CLI error: ${err.message}`))
       })
-
-      // 60s timeout
-      setTimeout(() => {
-        try { proc.kill() } catch {}
-      }, 60_000)
     })
   }
 }

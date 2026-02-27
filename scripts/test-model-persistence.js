@@ -12,10 +12,13 @@ const mod = require('../dist/vscode/persistence.js');
 const {
   MODEL_STATE_FILENAME,
   PRESET_STATE_FILENAME,
+  FORMAT_STYLES_STATE_FILENAME,
   persistModel,
   persistPreset,
+  persistFormatStyles,
   readPersistedModel,
   readPersistedPreset,
+  readPersistedFormatStyles,
 } = mod;
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kibitz-persistence-'));
@@ -41,6 +44,24 @@ try {
   assert(
     readPersistedPreset(tempDir, 'auto') === 'critical-coder',
     'preset should be restored from disk',
+  );
+
+  persistFormatStyles(tempDir, ['bullets', 'table']);
+  assert(
+    fs.existsSync(path.join(tempDir, FORMAT_STYLES_STATE_FILENAME)),
+    'format styles file should be created',
+  );
+  const persistedStyles = readPersistedFormatStyles(tempDir, ['scoreboard']);
+  assert(
+    Array.isArray(persistedStyles) && persistedStyles.join(',') === 'bullets,table',
+    'format styles should be restored from disk in saved order',
+  );
+
+  fs.writeFileSync(path.join(tempDir, FORMAT_STYLES_STATE_FILENAME), '["bad-style"]', 'utf8');
+  const fallbackStyles = readPersistedFormatStyles(tempDir, ['emoji-bullets', 'one-liner']);
+  assert(
+    Array.isArray(fallbackStyles) && fallbackStyles.join(',') === 'emoji-bullets,one-liner',
+    'fallback styles should be used when disk value is invalid',
   );
 
   console.log('Model persistence smoke test: PASS');

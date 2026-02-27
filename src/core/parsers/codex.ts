@@ -29,7 +29,7 @@ function truncate(s: string, max: number): string {
 }
 
 function projectNameFromCwd(cwd: string): string {
-  const parts = cwd.split('/')
+  const parts = String(cwd || '').split(/[\\/]+/).filter(Boolean)
   return parts[parts.length - 1] || 'unknown'
 }
 
@@ -152,9 +152,13 @@ function summarizeCodexTool(name: string, args: Record<string, unknown>): string
 
 function sessionIdFromFilePath(filePath: string): string {
   // rollout-2026-02-26T14-50-17-019c9b80-85dd-7c42-b95b-b1b1eb9fdafb.jsonl
-  const basename = filePath.split('/').pop() || ''
+  const basename = String(filePath || '')
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .pop()
+    ?.replace(/\.jsonl$/i, '') || ''
   const match = basename.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)
-  return match ? match[1] : basename.replace('.jsonl', '')
+  return match ? match[1] : basename
 }
 
 function projectFromFilePath(filePath: string): string {
