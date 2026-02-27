@@ -251,7 +251,7 @@
       }
 
       .hero-feed {
-        padding: 18px 18px 16px;
+        padding: 18px;
         display: flex;
         flex-direction: column;
       }
@@ -261,7 +261,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        padding: 8px 8px 14px;
+        padding: 8px 8px 12px;
         border-bottom: 1px solid rgba(176, 196, 255, 0.16);
       }
 
@@ -271,7 +271,7 @@
         font-weight: 700;
       }
 
-      .feed-pill {
+      .feed-note {
         padding: 5px 10px;
         border: 1px solid rgba(103, 167, 255, 0.35);
         border-radius: 999px;
@@ -280,43 +280,18 @@
         background: rgba(103, 167, 255, 0.12);
       }
 
-      .feed-list {
-        margin: 14px 0 0;
-        padding: 0;
-        list-style: none;
-        display: grid;
-        gap: 10px;
-      }
-
-      .feed-item {
+      .feed-preview {
+        margin-top: 12px;
         border: 1px solid rgba(176, 196, 255, 0.14);
+        border-radius: 14px;
         background: rgba(9, 17, 40, 0.72);
-        border-radius: 12px;
-        padding: 12px;
+        overflow: hidden;
       }
 
-      .feed-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-
-      .feed-session {
-        font-size: 13px;
-        color: #b9c8ef;
-      }
-
-      .feed-status {
-        font-size: 12px;
-        color: #b7f5df;
-      }
-
-      .feed-line {
-        margin-top: 8px;
-        font-size: 14px;
-        color: #e6edff;
-        line-height: 1.4;
+      .feed-image {
+        width: 100%;
+        display: block;
+        height: auto;
       }
 
       .section {
@@ -517,32 +492,12 @@
 
         <aside class="panel hero-feed">
           <div class="feed-head">
-            <span class="feed-title">Live Feed</span>
-            <span class="feed-pill">3 active sessions</span>
+            <span class="feed-title">Kibitz Feed</span>
+            <span class="feed-note">Actual UI</span>
           </div>
-          <ul class="feed-list">
-            <li class="feed-item">
-              <div class="feed-row">
-                <span class="feed-session">codex / session-17</span>
-                <span class="feed-status">sent</span>
-              </div>
-              <div class="feed-line">Refactoring parser to reduce dispatch latency spikes.</div>
-            </li>
-            <li class="feed-item">
-              <div class="feed-row">
-                <span class="feed-session">claude / session-09</span>
-                <span class="feed-status">started</span>
-              </div>
-              <div class="feed-line">Running compatibility checks for macOS + Windows release build.</div>
-            </li>
-            <li class="feed-item">
-              <div class="feed-row">
-                <span class="feed-session">codex / new-session</span>
-                <span class="feed-status">queued</span>
-              </div>
-              <div class="feed-line">Drafting release note with latest prompt dispatch improvements.</div>
-            </li>
-          </ul>
+          <div class="feed-preview">
+            <img class="feed-image" src="/feed.png" alt="Kibitz live feed screenshot" />
+          </div>
         </aside>
       </section>
 
