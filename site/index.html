@@ -29,16 +29,25 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="icon" href="/icon.png" type="image/png" sizes="256x256" />
     <link rel="apple-touch-icon" href="/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
-        --bg: #0f172a;
-        --bg2: #1e293b;
-        --card: #111827;
-        --text: #e5e7eb;
-        --muted: #94a3b8;
-        --accent: #22d3ee;
-        --accent2: #38bdf8;
-        --border: rgba(148, 163, 184, 0.25);
+        --bg: #050816;
+        --bg2: #0c142f;
+        --bg3: #172551;
+        --card: rgba(8, 14, 34, 0.82);
+        --card-solid: #0d1734;
+        --text: #eef3ff;
+        --muted: #a8b6da;
+        --line: rgba(176, 196, 255, 0.22);
+        --accent: #57f1c2;
+        --accent2: #67a7ff;
+        --accent3: #8ac1ff;
       }
 
       * {
@@ -47,163 +56,553 @@
 
       body {
         margin: 0;
-        font-family: "SF Pro Display", "Segoe UI", Inter, Arial, sans-serif;
+        font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
         color: var(--text);
         background:
-          radial-gradient(1000px 450px at 20% -10%, rgba(34, 211, 238, 0.2), transparent 60%),
-          radial-gradient(900px 450px at 100% 0%, rgba(56, 189, 248, 0.18), transparent 60%),
-          linear-gradient(160deg, var(--bg), var(--bg2));
+          radial-gradient(1100px 480px at 10% -10%, rgba(95, 242, 194, 0.14), transparent 60%),
+          radial-gradient(1100px 480px at 100% 0%, rgba(102, 160, 255, 0.18), transparent 55%),
+          linear-gradient(165deg, var(--bg), var(--bg2) 55%, var(--bg3));
         min-height: 100vh;
+        overflow-x: hidden;
       }
 
-      .wrap {
-        max-width: 880px;
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.2;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: radial-gradient(circle at center, #000 35%, transparent 95%);
+      }
+
+      .shell {
+        position: relative;
+        z-index: 1;
+        max-width: 1120px;
         margin: 0 auto;
-        padding: 72px 20px;
+        padding: 24px 20px 72px;
       }
 
-      .card {
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        background: linear-gradient(180deg, rgba(17, 24, 39, 0.9), rgba(2, 6, 23, 0.95));
-        padding: 34px 28px;
-        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
-      }
-
-      .brand {
+      .topbar {
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 14px;
+        justify-content: space-between;
+        gap: 20px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 12px 14px;
+        background: rgba(8, 14, 34, 0.54);
+        backdrop-filter: blur(8px);
+      }
+
+      .brand-lockup {
+        display: flex;
+        align-items: center;
+        gap: 10px;
       }
 
       .logo {
-        width: 36px;
-        height: 36px;
-        border-radius: 10px;
+        width: 34px;
+        height: 34px;
+        border-radius: 9px;
       }
 
-      h1 {
-        margin: 0;
-        font-size: clamp(34px, 6vw, 58px);
-        line-height: 1.05;
-        letter-spacing: -0.02em;
+      .brand-name {
+        font-family: "Space Grotesk", "Avenir Next", sans-serif;
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
       }
 
-      .tag {
-        display: inline-block;
+      .nav {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      .nav a {
+        color: #cdd9ff;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .hero {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: 1.12fr 0.88fr;
+        gap: 22px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: linear-gradient(180deg, rgba(13, 23, 52, 0.87), rgba(7, 12, 29, 0.9));
+        box-shadow: 0 24px 58px rgba(3, 7, 19, 0.58);
+      }
+
+      .hero-copy {
+        padding: 36px 34px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
         margin-bottom: 14px;
-        padding: 5px 10px;
+        padding: 6px 12px;
         border-radius: 999px;
-        background: rgba(34, 211, 238, 0.14);
-        border: 1px solid rgba(34, 211, 238, 0.3);
-        color: #a5f3fc;
+        border: 1px solid rgba(110, 240, 199, 0.34);
+        background: rgba(87, 241, 194, 0.1);
+        color: #baf8e6;
         font-size: 12px;
         font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
 
-      p {
-        margin: 16px 0 0;
+      .pulse {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 0 rgba(87, 241, 194, 0.5);
+        animation: pulse 2s infinite;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: "Space Grotesk", "Avenir Next", sans-serif;
+        font-size: clamp(38px, 6.6vw, 76px);
+        line-height: 0.98;
+        letter-spacing: -0.025em;
+        text-wrap: balance;
+      }
+
+      .sub {
+        margin: 18px 0 0;
         color: var(--muted);
-        font-size: clamp(16px, 2vw, 20px);
-        line-height: 1.55;
-        max-width: 760px;
+        font-size: clamp(17px, 2.2vw, 21px);
+        line-height: 1.56;
+        max-width: 52ch;
       }
 
       .support {
-        margin-top: 18px;
-        display: inline-flex;
+        margin-top: 22px;
+        display: flex;
         flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        display: inline-flex;
         align-items: center;
         gap: 8px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: rgba(15, 23, 42, 0.78);
         padding: 8px 12px;
-        color: #dbeafe;
-        font-size: 14px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(10, 17, 41, 0.7);
+        color: #dce6ff;
+        font-size: 13px;
+        font-weight: 500;
       }
 
-      .grid {
-        margin-top: 28px;
-        display: grid;
-        gap: 12px;
-      }
-
-      .item {
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 12px 14px;
-        color: #cbd5e1;
-        background: rgba(15, 23, 42, 0.7);
-      }
-
-      .item b {
-        color: #e2e8f0;
+      .chip-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent2);
       }
 
       .actions {
-        margin-top: 22px;
+        margin-top: 24px;
         display: flex;
         gap: 12px;
         flex-wrap: wrap;
       }
 
-      a.btn {
+      .btn {
         text-decoration: none;
+        border-radius: 12px;
         font-weight: 600;
-        border-radius: 11px;
-        padding: 10px 15px;
+        padding: 10px 16px;
         border: 1px solid transparent;
+        transition: transform 140ms ease, box-shadow 140ms ease;
       }
 
-      a.primary {
-        background: linear-gradient(90deg, var(--accent), var(--accent2));
-        color: #082f49;
+      .btn:hover {
+        transform: translateY(-1px);
       }
 
-      a.ghost {
-        border-color: var(--border);
-        color: var(--text);
-        background: rgba(30, 41, 59, 0.6);
+      .btn-primary {
+        background: linear-gradient(90deg, var(--accent), #89f3d2);
+        color: #042219;
+        box-shadow: 0 10px 28px rgba(95, 242, 194, 0.28);
+      }
+
+      .btn-ghost {
+        border-color: var(--line);
+        color: #e3eaff;
+        background: rgba(16, 28, 59, 0.6);
+      }
+
+      .hero-feed {
+        padding: 18px 18px 16px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .feed-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 8px 14px;
+        border-bottom: 1px solid rgba(176, 196, 255, 0.16);
+      }
+
+      .feed-title {
+        font-family: "Space Grotesk", "Avenir Next", sans-serif;
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .feed-pill {
+        padding: 5px 10px;
+        border: 1px solid rgba(103, 167, 255, 0.35);
+        border-radius: 999px;
+        font-size: 12px;
+        color: #dce8ff;
+        background: rgba(103, 167, 255, 0.12);
+      }
+
+      .feed-list {
+        margin: 14px 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 10px;
+      }
+
+      .feed-item {
+        border: 1px solid rgba(176, 196, 255, 0.14);
+        background: rgba(9, 17, 40, 0.72);
+        border-radius: 12px;
+        padding: 12px;
+      }
+
+      .feed-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .feed-session {
+        font-size: 13px;
+        color: #b9c8ef;
+      }
+
+      .feed-status {
+        font-size: 12px;
+        color: #b7f5df;
+      }
+
+      .feed-line {
+        margin-top: 8px;
+        font-size: 14px;
+        color: #e6edff;
+        line-height: 1.4;
+      }
+
+      .section {
+        margin-top: 22px;
+        padding: 24px;
+      }
+
+      .section h2 {
+        margin: 0;
+        font-family: "Space Grotesk", "Avenir Next", sans-serif;
+        font-size: clamp(28px, 4vw, 40px);
+        line-height: 1.05;
+      }
+
+      .section p.lead {
+        margin: 10px 0 0;
+        color: var(--muted);
+        max-width: 64ch;
+      }
+
+      .feature-grid {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .feature-card {
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: rgba(12, 20, 48, 0.66);
+        padding: 15px;
+      }
+
+      .feature-card h3 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      .feature-card p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .support-grid {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .support-tile {
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        padding: 14px;
+        background: rgba(8, 16, 39, 0.7);
+      }
+
+      .support-tile strong {
+        display: block;
+        font-size: 16px;
+        margin-bottom: 6px;
+      }
+
+      .support-tile span {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.4;
+      }
+
+      .cta {
+        margin-top: 22px;
+        padding: 22px 24px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .cta h3 {
+        margin: 0;
+        font-size: 23px;
+        font-family: "Space Grotesk", "Avenir Next", sans-serif;
+      }
+
+      .cta p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 14px;
       }
 
       .foot {
-        margin-top: 16px;
+        margin-top: 20px;
+        text-align: center;
         font-size: 13px;
-        color: #94a3b8;
+        color: #9db0df;
+      }
+
+      .foot a {
+        color: #d8e4ff;
+        text-decoration: none;
+        margin: 0 8px;
+      }
+
+      .foot a:hover {
+        text-decoration: underline;
+      }
+
+      @keyframes pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(87, 241, 194, 0.5);
+        }
+        70% {
+          box-shadow: 0 0 0 8px rgba(87, 241, 194, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(87, 241, 194, 0);
+        }
+      }
+
+      @media (max-width: 980px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+
+        .feature-grid,
+        .support-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          padding: 14px 14px 50px;
+        }
+
+        .topbar,
+        .hero-copy,
+        .hero-feed,
+        .section,
+        .cta {
+          border-radius: 16px;
+        }
+
+        .hero-copy {
+          padding: 24px 20px;
+        }
+
+        h1 {
+          font-size: clamp(34px, 13vw, 52px);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation: none !important;
+          transition: none !important;
+        }
       }
     </style>
   </head>
   <body>
-    <main class="wrap">
-      <section class="card">
-        <div class="brand">
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand-lockup">
           <img class="logo" src="/icon.svg" alt="Kibitz icon" />
-          <span class="tag">Kibitz</span>
+          <span class="brand-name">Kibitz</span>
         </div>
-        <h1>Decode your agents</h1>
-        <p>
-          Kibitz watches active Claude Code and Codex sessions, translates agent activity into clear live commentary,
-          and lets you route prompts to any active session from one place.
-        </p>
-        <div class="support"><strong>Supported:</strong> macOS + Windows <span>|</span> Linux best effort</div>
+        <nav class="nav">
+          <a href="#features">Features</a>
+          <a href="#support">Support</a>
+          <a href="/privacy.html">Privacy</a>
+          <a href="/terms.html">Terms</a>
+        </nav>
+      </header>
 
-        <div class="grid">
-          <div class="item"><b>Live feed:</b> Real-time summaries across multiple agent sessions.</div>
-          <div class="item"><b>Dispatch:</b> Send prompts to existing sessions or start a new one instantly.</div>
-          <div class="item"><b>Workflow:</b> Use Kibitz inside VS Code or from the terminal CLI.</div>
-        </div>
+      <section class="hero">
+        <article class="panel hero-copy">
+          <div class="eyebrow"><span class="pulse"></span> Live session decoding</div>
+          <h1>Decode your agents.</h1>
+          <p class="sub">
+            Kibitz watches Claude Code and Codex sessions, turns raw activity into clear commentary, and lets you
+            dispatch prompts to any active session or a new one from one command surface.
+          </p>
+          <div class="support">
+            <span class="chip"><span class="chip-dot"></span> macOS supported</span>
+            <span class="chip"><span class="chip-dot"></span> Windows supported</span>
+            <span class="chip"><span class="chip-dot"></span> Linux best effort</span>
+          </div>
+          <div class="actions">
+            <a class="btn btn-primary" href="https://github.com/kibitzsh/kibitz">Get Kibitz</a>
+            <a class="btn btn-ghost" href="https://github.com/kibitzsh/kibitz#readme">Read docs</a>
+          </div>
+        </article>
 
-        <div class="actions">
-          <a class="btn primary" href="https://github.com/kibitzsh/kibitz">View on GitHub</a>
-          <a class="btn ghost" href="https://github.com/kibitzsh/kibitz#readme">Read docs</a>
-        </div>
-
-        <div class="foot">© Kibitz</div>
+        <aside class="panel hero-feed">
+          <div class="feed-head">
+            <span class="feed-title">Live Feed</span>
+            <span class="feed-pill">3 active sessions</span>
+          </div>
+          <ul class="feed-list">
+            <li class="feed-item">
+              <div class="feed-row">
+                <span class="feed-session">codex / session-17</span>
+                <span class="feed-status">sent</span>
+              </div>
+              <div class="feed-line">Refactoring parser to reduce dispatch latency spikes.</div>
+            </li>
+            <li class="feed-item">
+              <div class="feed-row">
+                <span class="feed-session">claude / session-09</span>
+                <span class="feed-status">started</span>
+              </div>
+              <div class="feed-line">Running compatibility checks for macOS + Windows release build.</div>
+            </li>
+            <li class="feed-item">
+              <div class="feed-row">
+                <span class="feed-session">codex / new-session</span>
+                <span class="feed-status">queued</span>
+              </div>
+              <div class="feed-line">Drafting release note with latest prompt dispatch improvements.</div>
+            </li>
+          </ul>
+        </aside>
       </section>
+
+      <section class="panel section" id="features">
+        <h2>Built for real session control</h2>
+        <p class="lead">
+          Monitor many agents without tab hopping, route prompts with explicit targets, and keep one clear view of what
+          every session is doing.
+        </p>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <h3>Cross-session dispatch</h3>
+            <p>Send to any active watched session, or create a new session and dispatch in one step.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Narrative commentary</h3>
+            <p>Readable live summaries instead of raw terminal noise, tuned for fast project decisions.</p>
+          </article>
+          <article class="feature-card">
+            <h3>VS Code + CLI</h3>
+            <p>Use the panel in VS Code or control the same workflow from terminal when you prefer keyboard-only ops.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel section" id="support">
+        <h2>Platform support</h2>
+        <p class="lead">Optimized where most teams run coding agents today, with platform-aware process handling.</p>
+        <div class="support-grid">
+          <div class="support-tile">
+            <strong>macOS</strong>
+            <span>Supported for VS Code panel and terminal CLI workflows.</span>
+          </div>
+          <div class="support-tile">
+            <strong>Windows</strong>
+            <span>Supported with command mapping (`claude.cmd` / `codex.cmd`) and compatible dispatch flow.</span>
+          </div>
+          <div class="support-tile">
+            <strong>Linux</strong>
+            <span>Best effort support for teams running Linux workstations and CI-side agent tasks.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel cta">
+        <div>
+          <h3>Ship faster with fewer agent blind spots.</h3>
+          <p>Use Kibitz to see exactly what each session is doing before you approve the next move.</p>
+        </div>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://github.com/kibitzsh/kibitz">Open GitHub</a>
+          <a class="btn btn-ghost" href="https://github.com/kibitzsh/kibitz/issues">Report issue</a>
+        </div>
+      </section>
+
+      <footer class="foot">
+        <span>© Kibitz</span>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+      </footer>
     </main>
   </body>
 </html>
