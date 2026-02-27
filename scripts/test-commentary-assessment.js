@@ -78,6 +78,29 @@ function testSecurityAlert(buildCommentaryAssessment, applyAssessmentSignals) {
   assert(/on.?track|drifting|blocked|momentum|confidence/i.test(text), 'closing line should be guaranteed');
 }
 
+function testNoVerdictInOutput(buildCommentaryAssessment, applyAssessmentSignals, sanitizeCommentary) {
+  const events = [
+    makeEvent({ summary: 'Edited src/index.ts', details: { tool: 'edit_file', input: { path: 'src/index.ts' } } }),
+  ];
+  const assessment = buildCommentaryAssessment(events, 'Fix bug');
+
+  // Simulate different ways the LLM might output "Verdict:"
+  const cases = [
+    'Agent fixed the bug.\nVerdict: on-track (high confidence); security clean.',
+    'Agent fixed the bug. Verdict: on-track.',
+    '- Fixed login\n- Verdict: solid progress\nVerdict: on-track.',
+    'Good work. verdict: drifting.',
+  ];
+
+  for (const raw of cases) {
+    const sanitized = sanitizeCommentary(raw);
+    assert(!/verdict\s*:/i.test(sanitized), `sanitize should strip "Verdict:" from: ${raw}`);
+
+    const final = applyAssessmentSignals(sanitized, assessment);
+    assert(!/verdict\s*:/i.test(final), `final output must not contain "Verdict:" for input: ${raw}`);
+  }
+}
+
 function main() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kibitz-commentary-test-'));
   try {
@@ -88,10 +111,12 @@ function main() {
 
     assert(typeof mod.buildCommentaryAssessment === 'function', 'buildCommentaryAssessment should export');
     assert(typeof mod.applyAssessmentSignals === 'function', 'applyAssessmentSignals should export');
+    assert(typeof mod.sanitizeGeneratedCommentary === 'function', 'sanitizeGeneratedCommentary should export');
 
     testOnTrackAssessment(mod.buildCommentaryAssessment);
     testDriftAssessment(mod.buildCommentaryAssessment);
     testSecurityAlert(mod.buildCommentaryAssessment, mod.applyAssessmentSignals);
+    testNoVerdictInOutput(mod.buildCommentaryAssessment, mod.applyAssessmentSignals, mod.sanitizeGeneratedCommentary);
 
     process.stdout.write('commentary assessment tests passed\n');
   } finally {

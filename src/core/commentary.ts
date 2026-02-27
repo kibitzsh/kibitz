@@ -825,14 +825,14 @@ function sanitizePromptText(text: string): string {
     .trim()
 }
 
-function sanitizeGeneratedCommentary(text: string): string {
+export function sanitizeGeneratedCommentary(text: string): string {
   let out = redactSessionIdentifiers(String(text || ''))
   out = out.replace(/\blocal session logs?\b/gi, 'recent actions')
   out = out.replace(/\bsession logs?\b/gi, 'actions')
   out = out.replace(/\bsession id\b/gi, 'session')
 
-  // Strip any "Verdict:" label the LLM generates — keep the text after it
-  out = out.replace(/^verdict\s*:\s*/gim, '')
+  // Strip any "Verdict:" label the LLM generates anywhere in the text — keep the text after it
+  out = out.replace(/\bverdict\s*:\s*/gi, '')
 
   const blockedLine = /\b(i['’]?ll|i will|we(?:'ll| will)?)\b.*\b(pull|fetch|read|inspect|scan|parse|load|check)\b.*\b(session|log|trace|jsonl|prompt|history)\b/i
   const keptLines = out.split('\n').filter(line => !blockedLine.test(line.trim()))
