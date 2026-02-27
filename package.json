@@ -1,10 +1,14 @@
 {
   "name": "kibitz",
   "displayName": "Kibitz",
-  "description": "Real-time entertaining commentary on AI coding agent sessions (Claude Code, Codex CLI)",
+  "description": "Real-time decoded feed of AI agent actions — monitor multiple Claude Code & Codex sessions, see exactly what each agent is doing, and coordinate swarms efficiently",
   "version": "0.0.3",
-  "publisher": "vasily",
+  "publisher": "kibitzsh",
   "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kibitzsh/kibitz"
+  },
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
