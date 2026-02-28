@@ -160,7 +160,8 @@ export class SessionWatcher extends EventEmitter {
       agent,
       deriveSessionId(filePath, agent),
     )
-    const ignore = agent === 'codex' && isKibitzInternalCodexSession(filePath)
+    const ignore = (agent === 'codex' && isKibitzInternalCodexSession(filePath))
+      || (agent === 'claude' && isKibitzInternalClaudeSession(filePath))
     const sessionTitle = extractSessionTitle(filePath, agent, sessionId)
     const entry: WatchedFile = {
       filePath,
@@ -535,9 +536,36 @@ function isKibitzInternalCodexLine(line: string): boolean {
 
 function looksLikeKibitzGeneratedPrompt(text: string): boolean {
   if (!text) return false
+  // tone preset: is absent when preset=auto (the default), so don't require it
   return text.includes('you oversee ai coding agents. summarize what they did')
     && text.includes('format for this message:')
-    && text.includes('tone preset:')
+}
+
+function isKibitzInternalClaudeSession(filePath: string): boolean {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8')
+    const lines = content.split('\n')
+    for (let i = 0; i < lines.length && i < 20; i++) {
+      const line = lines[i]
+      if (!line.trim()) continue
+      try {
+        const obj: any = JSON.parse(line)
+        if (obj.type !== 'user') continue
+        const msg = obj.message
+        const c = msg?.content
+        let text = ''
+        if (typeof c === 'string') text = c
+        else if (Array.isArray(c)) {
+          for (const block of c) {
+            if (block.type === 'text') { text = block.text; break }
+          }
+        }
+        if (text) return looksLikeKibitzGeneratedPrompt(text.toLowerCase())
+        break
+      } catch { /* ignore malformed */ }
+    }
+  } catch { /* unreadable */ }
+  return false
 }
 
 interface CodexThreadTitlesSnapshot {
