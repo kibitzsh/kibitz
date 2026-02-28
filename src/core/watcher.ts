@@ -50,6 +50,7 @@ export class SessionWatcher extends EventEmitter {
     for (const w of this.watched.values()) {
       if (w.ignore) continue
       this.reconcileSessionTitle(w)
+      if (w.ignore) continue
       try {
         const stat = fs.statSync(w.filePath)
         if (now - stat.mtimeMs > SessionWatcher.ACTIVE_SESSION_WINDOW_MS) continue
@@ -276,13 +277,20 @@ export class SessionWatcher extends EventEmitter {
       }
     }
 
-    // Avoid persisting prompt/instruction text as a session label (both agents).
-    // For Claude sessions, also retroactively mark as ignored if the file confirms it's
-    // a Kibitz commentary session (handles the timing race where file was empty at watch time).
-    if (entry.sessionTitle && isNoiseSessionTitle(entry.sessionTitle)) {
-      if (entry.agent === 'claude' && isKibitzInternalClaudeSession(entry.filePath)) {
+    // For Claude sessions without a real title (no title or noise), re-check whether
+    // this is a Kibitz internal session. This catches the timing race where the file
+    // was empty when watchFile was first called, so isKibitzInternalClaudeSession()
+    // returned false at that point. Once the user message is written, this will detect it.
+    if (entry.agent === 'claude' && (!entry.sessionTitle || isNoiseSessionTitle(entry.sessionTitle))) {
+      if (isKibitzInternalClaudeSession(entry.filePath)) {
         entry.ignore = true
+        entry.sessionTitle = undefined
+        return
       }
+    }
+
+    // Avoid persisting prompt/instruction text as a session label (both agents).
+    if (entry.sessionTitle && isNoiseSessionTitle(entry.sessionTitle)) {
       entry.sessionTitle = undefined
     }
   }
