@@ -277,7 +277,12 @@ export class SessionWatcher extends EventEmitter {
     }
 
     // Avoid persisting prompt/instruction text as a session label (both agents).
+    // For Claude sessions, also retroactively mark as ignored if the file confirms it's
+    // a Kibitz commentary session (handles the timing race where file was empty at watch time).
     if (entry.sessionTitle && isNoiseSessionTitle(entry.sessionTitle)) {
+      if (entry.agent === 'claude' && isKibitzInternalClaudeSession(entry.filePath)) {
+        entry.ignore = true
+      }
       entry.sessionTitle = undefined
     }
   }
