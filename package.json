@@ -2,7 +2,7 @@
   "name": "kibitz",
   "displayName": "Kibitz",
   "description": "Real-time decoded feed of AI agent actions — monitor multiple Claude Code & Codex sessions, see exactly what each agent is doing, and coordinate swarms efficiently",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "kibitzsh",
   "icon": "media/icon.png",
   "repository": {
