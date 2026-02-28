@@ -49,7 +49,7 @@ export class SessionWatcher extends EventEmitter {
     const sessionsByKey = new Map<string, SessionInfo>()
     for (const w of this.watched.values()) {
       if (w.ignore) continue
-      this.reconcileCodexSessionTitle(w)
+      this.reconcileSessionTitle(w)
       try {
         const stat = fs.statSync(w.filePath)
         if (now - stat.mtimeMs > SessionWatcher.ACTIVE_SESSION_WINDOW_MS) continue
@@ -199,7 +199,7 @@ export class SessionWatcher extends EventEmitter {
       stat = fs.statSync(entry.filePath)
     } catch { return }
 
-    this.reconcileCodexSessionTitle(entry)
+    this.reconcileSessionTitle(entry)
     if (stat.size <= entry.offset) return
 
     const fd = fs.openSync(entry.filePath, 'r')
@@ -213,6 +213,10 @@ export class SessionWatcher extends EventEmitter {
 
     for (const line of lines) {
       if (entry.agent === 'codex' && isKibitzInternalCodexLine(line)) {
+        entry.ignore = true
+        break
+      }
+      if (entry.agent === 'claude' && isKibitzInternalClaudeUserLine(line)) {
         entry.ignore = true
         break
       }
@@ -263,16 +267,16 @@ export class SessionWatcher extends EventEmitter {
     }
   }
 
-  private reconcileCodexSessionTitle(entry: WatchedFile): void {
-    if (entry.agent !== 'codex') return
-
-    const threadTitle = getCodexThreadTitle(entry.sessionId)
-    if (threadTitle) {
-      if (threadTitle !== entry.sessionTitle) entry.sessionTitle = threadTitle
-      return
+  private reconcileSessionTitle(entry: WatchedFile): void {
+    if (entry.agent === 'codex') {
+      const threadTitle = getCodexThreadTitle(entry.sessionId)
+      if (threadTitle) {
+        if (threadTitle !== entry.sessionTitle) entry.sessionTitle = threadTitle
+        return
+      }
     }
 
-    // Avoid persisting prompt/instruction text as a session label when no thread title exists.
+    // Avoid persisting prompt/instruction text as a session label (both agents).
     if (entry.sessionTitle && isNoiseSessionTitle(entry.sessionTitle)) {
       entry.sessionTitle = undefined
     }
@@ -505,6 +509,23 @@ function isKibitzInternalCodexSession(filePath: string): boolean {
   } catch {
     // unreadable session file
   }
+  return false
+}
+
+function isKibitzInternalClaudeUserLine(line: string): boolean {
+  try {
+    const obj: any = JSON.parse(line)
+    if (obj.type !== 'user') return false
+    const c = obj.message?.content
+    if (typeof c === 'string') return looksLikeKibitzGeneratedPrompt(c.toLowerCase())
+    if (Array.isArray(c)) {
+      for (const block of c) {
+        if (block.type === 'text' && typeof block.text === 'string') {
+          if (looksLikeKibitzGeneratedPrompt(block.text.toLowerCase())) return true
+        }
+      }
+    }
+  } catch { /* ignore malformed */ }
   return false
 }
 
