@@ -692,7 +692,7 @@ function isNoiseSessionTitle(text: string): boolean {
     || normalized.startsWith('you oversee ai coding agents')
     || normalized.startsWith('plain language.')
     || normalized.startsWith('bold only key nouns')
-    || normalized.startsWith('upper case for emotional')
+    || normalized.startsWith('upper case')
     || normalized.startsWith('emoji are allowed')
     || normalized.startsWith('no filler.')
     || normalized.startsWith("don't repeat what previous commentary")
