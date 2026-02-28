@@ -94,6 +94,9 @@ export class SessionWatcher extends EventEmitter {
 
     const now = Date.now()
     for (const dir of projectDirs) {
+      // Skip the dedicated dir Kibitz uses for its own claude -p commentary sessions
+      // (~/.kibitz-sessions → encodes as ...-.kibitz-sessions in ~/.claude/projects/).
+      if (dir.endsWith('-.kibitz-sessions')) continue
       const dirPath = path.join(claudeDir, dir)
       let files: string[]
       try {

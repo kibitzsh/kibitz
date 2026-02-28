@@ -1,7 +1,11 @@
 import { spawn, execSync } from 'child_process'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
+
+// Kibitz commentary sessions run in this dedicated cwd so they land in a
+// project directory that the watcher can reliably skip (see scanClaude).
+const KIBITZ_COMMENTARY_CWD = join(homedir(), '.kibitz-sessions')
 import { Provider, ModelId } from '../types'
 
 let cachedClaudePath: string | null = null
@@ -125,18 +129,20 @@ export class AnthropicProvider implements Provider {
       delete env.ELECTRON_RUN_AS_NODE
       delete env.CLAUDECODE
 
+      try { mkdirSync(KIBITZ_COMMENTARY_CWD, { recursive: true }) } catch { /* best effort */ }
+
       let proc: ReturnType<typeof spawn>
       try {
         const nodeScript = resolveNodeScript(claudePath)
         if (nodeScript) {
           proc = spawn(process.execPath, [nodeScript, ...args], {
-            cwd: homedir(), env,
+            cwd: KIBITZ_COMMENTARY_CWD, env,
             stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
           })
         } else {
           proc = spawn(claudePath, args, {
-            cwd: homedir(), env,
+            cwd: KIBITZ_COMMENTARY_CWD, env,
             stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
             shell: process.platform === 'win32',
