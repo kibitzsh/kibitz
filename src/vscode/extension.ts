@@ -5,7 +5,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { SessionWatcher } from '../core/watcher'
 import { CommentaryEngine } from '../core/commentary'
-import { KibitzPanel } from './panel'
+import { ExtensionUpdateState, KibitzPanel } from './panel'
 import {
   COMMENTARY_STYLE_OPTIONS,
   CommentaryStyleId,
@@ -19,7 +19,11 @@ import {
 } from '../core/types'
 import { checkClaudeCliAvailable } from '../core/providers/anthropic'
 import { checkCodexCliAvailable } from '../core/providers/openai'
-import { persistSharedSummaryIntervalMs, readSharedSummaryIntervalMs } from '../core/shared-settings'
+import {
+  persistSharedExtensionUpdateCache,
+  persistSharedSummaryIntervalMs,
+  readSharedSummaryIntervalMs,
+} from '../core/shared-settings'
 import {
   persistFormatStyles,
   persistModel,
@@ -34,6 +38,7 @@ import {
   resolveDispatchCommand,
   SessionDispatchService,
 } from '../core/session-dispatch'
+import { isRemoteNewer, queryMarketplaceExtensionVersion } from '../core/updates'
 
 let watcher: SessionWatcher | undefined
 let engine: CommentaryEngine | undefined
@@ -41,6 +46,7 @@ let panel: KibitzPanel | undefined
 let dispatchService: SessionDispatchService | undefined
 let sessionsRefreshTimer: ReturnType<typeof setInterval> | null = null
 let panelTarget: DispatchTarget = { kind: 'new-codex' }
+let extensionUpdateRequestSeq = 0
 let commentaryHistory: Array<{
   timestamp: number
   sessionId: string
@@ -342,6 +348,63 @@ async function handlePanelDispatch(target: DispatchTarget, prompt: string): Prom
   await dispatchService.dispatch(request)
 }
 
+async function resolveExtensionUpdateState(
+  extensionId: string,
+  extensionVersion: string,
+): Promise<ExtensionUpdateState> {
+  const latestVersion = await queryMarketplaceExtensionVersion(extensionId)
+  const checkedAt = Date.now()
+  persistSharedExtensionUpdateCache({ checkedAt, latestVersion })
+
+  if (!latestVersion) {
+    return { available: false }
+  }
+
+  if (!isRemoteNewer(extensionVersion, latestVersion)) {
+    return { available: false }
+  }
+
+  return {
+    available: true,
+    latestVersion,
+  }
+}
+
+function refreshPanelExtensionUpdate(
+  context: vscode.ExtensionContext,
+  currentPanel: KibitzPanel,
+  extensionVersion: string,
+): void {
+  const requestId = ++extensionUpdateRequestSeq
+  const extensionId = String(context.extension.id || '').trim()
+  if (!extensionId) {
+    currentPanel.setExtensionUpdate({ available: false })
+    return
+  }
+
+  void resolveExtensionUpdateState(extensionId, extensionVersion)
+    .then((state) => {
+      if (!panel || panel !== currentPanel || !currentPanel.isVisible()) return
+      if (requestId !== extensionUpdateRequestSeq) return
+      currentPanel.setExtensionUpdate(state)
+    })
+    .catch(() => {
+      if (!panel || panel !== currentPanel || !currentPanel.isVisible()) return
+      if (requestId !== extensionUpdateRequestSeq) return
+      currentPanel.setExtensionUpdate({ available: false })
+    })
+}
+
+async function handlePanelExtensionUpdate(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    await vscode.commands.executeCommand('workbench.extensions.installExtension', context.extension.id)
+    void vscode.window.showInformationMessage('Kibitz update requested. VS Code will install the latest version if available.')
+  } catch (error) {
+    const message = normalizeErrorMessage(error)
+    void vscode.window.showErrorMessage(`Kibitz update failed: ${message}`)
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   inheritShellPath()
   const extensionVersion = String((context.extension.packageJSON as { version?: string }).version || 'dev')
@@ -388,6 +451,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           onSetTarget: (target) => {
             panelTarget = target
           },
+          onRequestExtensionUpdate: () => {
+            void handlePanelExtensionUpdate(context)
+          },
         })
         panelCreated = true
       } else {
@@ -400,6 +466,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       panel.setTarget(panelTarget)
       postActiveSessions()
+      refreshPanelExtensionUpdate(context, panel, extensionVersion)
     }),
 
     vscode.commands.registerCommand('kibitz.switchModel', async () => {

@@ -94,6 +94,7 @@ async function main() {
     const summaryIntervalSelect = document.getElementById('summary-interval-select');
     const modelSelect = document.getElementById('model-select');
     const sessionsBadge = document.getElementById('sessions');
+    const updateBadge = document.getElementById('update-badge');
     const feed = document.getElementById('feed');
 
     assert(targetBadges, 'target badges should exist');
@@ -103,6 +104,8 @@ async function main() {
     assert(styleMenu, 'style menu should exist');
     assert(summaryIntervalSelect, 'summary interval select should exist');
     assert(modelSelect, 'model select should exist');
+    assert(updateBadge, 'update badge should exist');
+    assert(updateBadge.classList.contains('hidden'), 'update badge should be hidden by default');
 
     function badgeTexts() {
       return Array.from(targetBadges.querySelectorAll('.target-badge')).map((node) => node.textContent.trim());
@@ -147,6 +150,26 @@ async function main() {
     sendWindowMessage(window, { type: 'set-format-styles', value: ['bullets', 'table'] });
     await tick();
     assert((styleMenuBtn.textContent || '').includes('(2)'), 'style menu button should reflect extension-updated style count');
+
+    posted.length = 0;
+    sendWindowMessage(window, {
+      type: 'set-extension-update',
+      value: { available: true, latestVersion: '0.0.9' },
+    });
+    await tick();
+    assert(!updateBadge.classList.contains('hidden'), 'update badge should show when update is available');
+    assert((updateBadge.textContent || '').includes('0.0.9'), 'update badge should include latest version');
+    updateBadge.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await tick();
+    const updateRequestMsg = lastPosted(posted, 'update-extension');
+    assert(updateRequestMsg, 'clicking update badge should emit update-extension');
+
+    sendWindowMessage(window, {
+      type: 'set-extension-update',
+      value: { available: false },
+    });
+    await tick();
+    assert(updateBadge.classList.contains('hidden'), 'update badge should hide when update is not available');
 
     const activeSessions = [
       {

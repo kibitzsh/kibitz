@@ -37,7 +37,7 @@ npm install -g @kibitzsh/kibitz
   - Existing active sessions.
   - New session on current provider.
 - Slash controls in composer:
-  - `/help`, `/pause`, `/resume`, `/clear`, `/focus`, `/model`, `/preset`, `/interval`
+  - `/help`, `/pause`, `/resume`, `/clear`, `/focus`, `/model`, `/preset`, `/interval`, `/update`
   - session targeting like `/1`, `/2`
 - Provider-aware model handling.
 - Strict dispatch status events: `queued`, `started`, `sent`, `failed`.
@@ -64,6 +64,7 @@ Kibitz can send prompts to any active watched session (Claude or Codex), or star
 - Use `/sessions` to list active sessions with numeric indexes.
 - Set target with `/target <index|agent:sessionId|new-codex|new-claude>`.
 - Set summary cadence with `/interval <15s|30s|1m|5m|15m|1h>`.
+- Check for updates with `/update`.
 - Starting a new terminal session is one command: `/target new-codex` (or `/target new-claude`), then send plain text.
 - After target selection, plain text sends to that target.
 - Dispatch status is printed for every send: `queued`, `started`, `sent`, `failed`.

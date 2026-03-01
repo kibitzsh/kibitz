@@ -20,9 +20,15 @@ import {
   summaryIntervalTokensList,
 } from '../core/summary-interval'
 
+export interface ExtensionUpdateState {
+  available: boolean
+  latestVersion?: string
+}
+
 interface PanelHandlers {
   onDispatchPrompt?: (target: DispatchTarget, prompt: string) => void
   onSetTarget?: (target: DispatchTarget) => void
+  onRequestExtensionUpdate?: () => void
 }
 
 type WebviewToExtensionMessage =
@@ -36,6 +42,7 @@ type WebviewToExtensionMessage =
   | { type: 'resume' }
   | { type: 'dispatch-prompt'; value: { target: DispatchTarget; prompt: string } }
   | { type: 'set-target'; value: DispatchTarget }
+  | { type: 'update-extension' }
 
 type ExtensionToWebviewMessage =
   | { type: 'history'; value: CommentaryEntry[] }
@@ -54,6 +61,7 @@ type ExtensionToWebviewMessage =
   | { type: 'active-sessions'; value: SessionInfo[] }
   | { type: 'dispatch-status'; value: DispatchStatus }
   | { type: 'target-selected'; value: DispatchTarget }
+  | { type: 'set-extension-update'; value: ExtensionUpdateState }
 
 export class KibitzPanel {
   private panel: vscode.WebviewPanel
@@ -133,6 +141,11 @@ export class KibitzPanel {
         const prompt = String(msg.value?.prompt || '')
         if (!target || !prompt.trim()) return
         this.handlers.onDispatchPrompt?.(target, prompt)
+        return
+      }
+
+      if (msg.type === 'update-extension') {
+        this.handlers.onRequestExtensionUpdate?.()
       }
     })
 
@@ -157,6 +170,7 @@ export class KibitzPanel {
     this.postMessage({ type: 'providers', value: this.providers })
     this.postMessage({ type: 'active-sessions', value: [] })
     this.postMessage({ type: 'target-selected', value: this.selectedTarget })
+    this.postMessage({ type: 'set-extension-update', value: { available: false } })
   }
 
   reveal(): void {
@@ -234,6 +248,17 @@ export class KibitzPanel {
   postDispatchStatus(status: DispatchStatus): void {
     if (this.disposed) return
     this.postMessage({ type: 'dispatch-status', value: status })
+  }
+
+  setExtensionUpdate(state: ExtensionUpdateState): void {
+    if (this.disposed) return
+    this.postMessage({
+      type: 'set-extension-update',
+      value: {
+        available: !!state.available,
+        latestVersion: state.latestVersion ? String(state.latestVersion) : undefined,
+      },
+    })
   }
 
   dispose(): void {
@@ -381,6 +406,22 @@ export function getInlineHtml(
     color: #cbd5e1;
     background: rgba(71, 85, 105, 0.38);
     border: 1px solid rgba(100, 116, 139, 0.52);
+  }
+  .badge-update {
+    appearance: none;
+    color: #fef3c7;
+    background: rgba(245, 158, 11, 0.22);
+    border: 1px solid rgba(245, 158, 11, 0.55);
+    cursor: pointer;
+  }
+  .badge-update:hover {
+    background: rgba(245, 158, 11, 0.3);
+  }
+  .badge-update:focus {
+    outline: 1px solid var(--vscode-focusBorder, #0ea5e9);
+  }
+  .badge-update.hidden {
+    display: none;
   }
   .provider-badge {
     font-size: 12px;
@@ -802,6 +843,7 @@ export function getInlineHtml(
   <div class="header">
     <h1>KIBITZ</h1>
     <span class="badge badge-version">v${safeVersion}</span>
+    <button id="update-badge" class="badge badge-update hidden" title="Install latest Kibitz extension">Update</button>
     ${providerBadges}
     <span class="badge badge-sessions" id="sessions">0 sessions</span>
 
@@ -872,6 +914,7 @@ export function getInlineHtml(
   const feed = document.getElementById('feed');
   const empty = document.getElementById('empty');
   const sessionsEl = document.getElementById('sessions');
+  const updateBadge = document.getElementById('update-badge');
   const modelSelect = document.getElementById('model-select');
   const modelMenuBtn = document.getElementById('model-menu-btn');
   const modelMenu = document.getElementById('model-menu');
@@ -1799,6 +1842,19 @@ export function getInlineHtml(
     }
   }
 
+  function setExtensionUpdateBadge(state) {
+    if (!updateBadge) return;
+    const available = !!(state && state.available);
+    const latestVersion = String((state && state.latestVersion) || '').trim();
+    if (!available || !latestVersion) {
+      updateBadge.classList.add('hidden');
+      updateBadge.textContent = 'Update';
+      return;
+    }
+    updateBadge.textContent = 'Update v' + latestVersion;
+    updateBadge.classList.remove('hidden');
+  }
+
   function showSlashHelp() {
     const commands = SLASH_COMMANDS.map((cmd) => cmd.usage).join(', ');
     pushSystemEntry('Slash commands: ' + commands, false);
@@ -2271,6 +2327,12 @@ export function getInlineHtml(
     setPausedState(!paused, true);
   });
 
+  if (updateBadge) {
+    updateBadge.addEventListener('click', () => {
+      vscode.postMessage({ type: 'update-extension' });
+    });
+  }
+
   composerInput.addEventListener('input', () => {
     const numericSlash = parseNumericSlashTargetInput(composerInput.value);
     if (numericSlash) {
@@ -2511,6 +2573,11 @@ export function getInlineHtml(
           ? provider.label + ' CLI ' + (provider.version || '')
           : provider.label + ' CLI not found';
       });
+      return;
+    }
+
+    if (msg.type === 'set-extension-update') {
+      setExtensionUpdateBadge(msg.value || {});
       return;
     }
 

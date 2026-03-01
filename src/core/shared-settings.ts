@@ -5,6 +5,13 @@ import { DEFAULT_SUMMARY_INTERVAL_MS, normalizeSummaryIntervalMs } from './summa
 
 const SHARED_DIR = path.join(os.homedir(), '.kibitz')
 const SUMMARY_INTERVAL_FILE = 'summary-interval'
+const UPDATE_CLI_CACHE_FILE = 'update-cli-cache.json'
+const UPDATE_EXTENSION_CACHE_FILE = 'update-extension-cache.json'
+
+export interface UpdateCheckCache {
+  checkedAt: number
+  latestVersion?: string
+}
 
 function sharedSettingPath(fileName: string, ensureDir = false): string {
   if (ensureDir && !fs.existsSync(SHARED_DIR)) {
@@ -33,6 +40,35 @@ function readSharedValue(fileName: string): string | undefined {
   }
 }
 
+function writeSharedJson(fileName: string, value: unknown): void {
+  try {
+    writeSharedValue(fileName, JSON.stringify(value))
+  } catch {
+    // Best-effort persistence.
+  }
+}
+
+function readSharedJson<T>(fileName: string): T | undefined {
+  try {
+    const raw = readSharedValue(fileName)
+    if (!raw) return undefined
+    return JSON.parse(raw) as T
+  } catch {
+    return undefined
+  }
+}
+
+function normalizeUpdateCache(value: unknown): UpdateCheckCache | undefined {
+  const candidate = value as UpdateCheckCache | undefined
+  const checkedAt = Number(candidate?.checkedAt)
+  if (!Number.isFinite(checkedAt) || checkedAt <= 0) return undefined
+  const latestVersion = String(candidate?.latestVersion || '').trim()
+  if (!latestVersion) {
+    return { checkedAt }
+  }
+  return { checkedAt, latestVersion }
+}
+
 export function persistSharedSummaryIntervalMs(intervalMs: number): void {
   const normalized = normalizeSummaryIntervalMs(intervalMs)
   writeSharedValue(SUMMARY_INTERVAL_FILE, String(normalized))
@@ -44,4 +80,26 @@ export function readSharedSummaryIntervalMs(fallback = DEFAULT_SUMMARY_INTERVAL_
   const parsed = Number(raw)
   if (!Number.isFinite(parsed)) return normalizeSummaryIntervalMs(fallback)
   return normalizeSummaryIntervalMs(parsed, fallback)
+}
+
+export function persistSharedCliUpdateCache(cache: UpdateCheckCache): void {
+  const normalized = normalizeUpdateCache(cache)
+  if (!normalized) return
+  writeSharedJson(UPDATE_CLI_CACHE_FILE, normalized)
+}
+
+export function readSharedCliUpdateCache(): UpdateCheckCache | undefined {
+  const raw = readSharedJson<UpdateCheckCache>(UPDATE_CLI_CACHE_FILE)
+  return normalizeUpdateCache(raw)
+}
+
+export function persistSharedExtensionUpdateCache(cache: UpdateCheckCache): void {
+  const normalized = normalizeUpdateCache(cache)
+  if (!normalized) return
+  writeSharedJson(UPDATE_EXTENSION_CACHE_FILE, normalized)
+}
+
+export function readSharedExtensionUpdateCache(): UpdateCheckCache | undefined {
+  const raw = readSharedJson<UpdateCheckCache>(UPDATE_EXTENSION_CACHE_FILE)
+  return normalizeUpdateCache(raw)
 }

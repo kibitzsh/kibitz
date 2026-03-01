@@ -1,4 +1,6 @@
 import * as readline from 'readline'
+import * as fs from 'fs'
+import * as path from 'path'
 import { SessionWatcher } from '../core/watcher'
 import { CommentaryEngine } from '../core/commentary'
 import {
@@ -20,7 +22,14 @@ import {
   summaryIntervalToken,
   summaryIntervalTokensList,
 } from '../core/summary-interval'
-import { persistSharedSummaryIntervalMs, readSharedSummaryIntervalMs } from '../core/shared-settings'
+import {
+  persistSharedCliUpdateCache,
+  persistSharedSummaryIntervalMs,
+  readSharedCliUpdateCache,
+  readSharedSummaryIntervalMs,
+  UpdateCheckCache,
+} from '../core/shared-settings'
+import { isRemoteNewer, queryNpmLatestVersion } from '../core/updates'
 
 // Minimal ANSI helpers (no dependency on chalk).
 const c = {
@@ -36,6 +45,116 @@ const noopKeyResolver: KeyResolver = {
   async getKey(_provider: ProviderId) {
     return 'subscription'
   },
+}
+
+const CLI_PACKAGE_NAME = '@kibitzsh/kibitz'
+const CLI_UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+
+export interface CliUpdateStatus {
+  currentVersion: string
+  latestVersion?: string
+  source: 'cache' | 'network'
+  state: 'up-to-date' | 'update-available' | 'unavailable'
+}
+
+export interface ResolveCliUpdateStatusOptions {
+  currentVersion: string
+  fetchLatestVersion: () => Promise<string | undefined>
+  forceFresh: boolean
+  now: number
+  readCache: () => UpdateCheckCache | undefined
+  ttlMs?: number
+  writeCache: (cache: UpdateCheckCache) => void
+}
+
+function readCliVersionFromPackageFile(): string | undefined {
+  const packagePath = path.resolve(__dirname, '..', '..', 'package.json')
+  try {
+    if (!fs.existsSync(packagePath)) return undefined
+    const payload = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { version?: unknown }
+    const version = String(payload?.version || '').trim()
+    return version || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function readCliVersion(): string {
+  const envVersion = String(process.env.npm_package_version || '').trim()
+  if (envVersion) return envVersion
+  return readCliVersionFromPackageFile() || 'dev'
+}
+
+function readFreshCachedLatestVersion(
+  cache: UpdateCheckCache | undefined,
+  now: number,
+  ttlMs: number,
+): { hasFreshCache: boolean; latestVersion?: string } {
+  const checkedAt = Number(cache?.checkedAt || 0)
+  if (!Number.isFinite(checkedAt) || checkedAt <= 0) {
+    return { hasFreshCache: false }
+  }
+  if (Math.max(0, now - checkedAt) >= ttlMs) {
+    return { hasFreshCache: false }
+  }
+  return {
+    hasFreshCache: true,
+    latestVersion: cache?.latestVersion,
+  }
+}
+
+export async function resolveCliUpdateStatus(options: ResolveCliUpdateStatusOptions): Promise<CliUpdateStatus> {
+  const currentVersion = String(options.currentVersion || '').trim() || 'dev'
+  const ttlMs = Number.isFinite(options.ttlMs) ? Math.max(0, Number(options.ttlMs)) : CLI_UPDATE_CACHE_TTL_MS
+
+  let source: 'cache' | 'network' = 'cache'
+  let latestVersion: string | undefined
+  const cached = readFreshCachedLatestVersion(options.readCache(), options.now, ttlMs)
+
+  if (!options.forceFresh && cached.hasFreshCache) {
+    latestVersion = String(cached.latestVersion || '').trim() || undefined
+  } else {
+    source = 'network'
+    latestVersion = await options.fetchLatestVersion()
+    options.writeCache({ checkedAt: options.now, latestVersion })
+  }
+
+  if (!latestVersion) {
+    return { currentVersion, source, state: 'unavailable' }
+  }
+
+  if (isRemoteNewer(currentVersion, latestVersion)) {
+    return {
+      currentVersion,
+      latestVersion,
+      source,
+      state: 'update-available',
+    }
+  }
+
+  return {
+    currentVersion,
+    latestVersion,
+    source,
+    state: 'up-to-date',
+  }
+}
+
+function printCliUpdateAvailable(latestVersion: string, currentVersion: string): void {
+  console.log(`  ${c.yellow(`Update available: ${currentVersion} -> ${latestVersion}`)}`)
+  console.log(`  ${c.dim('Run: npm install -g @kibitzsh/kibitz')}`)
+  console.log(`  ${c.dim('Or:  brew upgrade kibitz')}`)
+}
+
+async function resolveCliUpdateStatusFromRuntime(forceFresh: boolean): Promise<CliUpdateStatus> {
+  return resolveCliUpdateStatus({
+    currentVersion: readCliVersion(),
+    fetchLatestVersion: () => queryNpmLatestVersion(CLI_PACKAGE_NAME),
+    forceFresh,
+    now: Date.now(),
+    readCache: () => readSharedCliUpdateCache(),
+    writeCache: (cache) => persistSharedCliUpdateCache(cache),
+  })
 }
 
 function parseArgs(args: string[]): { model: ModelId; focus: string; agent: string | null } {
@@ -94,6 +213,7 @@ ${c.bold('Slash commands:')}
   /model <id-or-label>
   /preset <id>
   /interval <${summaryIntervalTokensList()}>
+  /update
   /sessions
   /target <index|agent:sessionId|new-codex|new-claude>
 
@@ -376,6 +496,20 @@ async function main(): Promise<void> {
       return
     }
 
+    if (command === 'update') {
+      const status = await resolveCliUpdateStatusFromRuntime(true)
+      if (status.state === 'update-available' && status.latestVersion) {
+        printCliUpdateAvailable(status.latestVersion, status.currentVersion)
+        return
+      }
+      if (status.state === 'up-to-date') {
+        console.log(`  ${c.dim(`Up to date (${status.currentVersion})`)}`)
+        return
+      }
+      console.log(`  ${c.dim('Could not check updates right now')}`)
+      return
+    }
+
     if (command === 'sessions') {
       printSessions()
       return
@@ -397,6 +531,19 @@ async function main(): Promise<void> {
     }
 
     console.log(`  ${c.red('Unknown command: /' + command)}`)
+  }
+
+  let isClosing = false
+
+  async function maybeShowStartupUpdateHint(): Promise<void> {
+    const status = await resolveCliUpdateStatusFromRuntime(false)
+    if (isClosing) return
+    if (status.state !== 'update-available' || !status.latestVersion) return
+    console.log('')
+    printCliUpdateAvailable(status.latestVersion, status.currentVersion)
+    if (!isClosing) {
+      printPromptLine()
+    }
   }
 
   rl.on('line', async (line) => {
@@ -423,21 +570,26 @@ async function main(): Promise<void> {
   })
 
   rl.on('close', () => {
+    isClosing = true
     watcher.stop()
     console.log(c.dim('\n  Kibitz out.'))
     process.exit(0)
   })
 
   process.on('SIGINT', () => {
+    isClosing = true
     watcher.stop()
     rl.close()
   })
 
   printPromptLine()
+  void maybeShowStartupUpdateHint()
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error)
-  console.error(c.red(`Fatal: ${message}`))
-  process.exit(1)
-})
+if (require.main === module) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(c.red(`Fatal: ${message}`))
+    process.exit(1)
+  })
+}
