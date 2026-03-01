@@ -1,0 +1,49 @@
+name: Daily Download Digest
+
+on:
+  schedule:
+    # Run at 16:00 and 17:00 UTC; script guards to only execute at 09:xx America/Los_Angeles.
+    - cron: "0 16,17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Restore download digest state
+        id: restore-state
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/download-digest
+          key: download-digest-state-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            download-digest-state-${{ runner.os }}-
+
+      - name: Run daily download digest
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: stats@kibitz.sh
+          ALERT_EMAIL_TO: vasilytrofimchuk@gmail.com
+          MARKETPLACE_EXTENSION_ID: kibitzsh.kibitz
+          GITHUB_REPO: kibitzsh/kibitz
+          GITHUB_TOKEN: ${{ github.token }}
+          ENFORCE_9AM_PT: ${{ github.event_name == 'schedule' && '1' || '0' }}
+        run: node scripts/download-digest.js
+
+      - name: Save download digest state
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/download-digest
+          key: download-digest-state-${{ runner.os }}-${{ github.run_id }}

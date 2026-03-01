@@ -136,6 +136,24 @@ npm run check:model-persistence
    - `VSCE_PAT` (VS Marketplace publish PAT)
    - `NPM_TOKEN` (npm publish token)
    - `HOMEBREW_TAP_TOKEN` (GitHub token with write access to `kibitzsh/homebrew-kibitz`)
+5. For daily download digest email workflow (`.github/workflows/release-download-digest.yml`), add:
+   - `RESEND_API_KEY` (Resend API key)
+   - sender is fixed to `stats@kibitz.sh`
+   - recipient is fixed to `vasilytrofimchuk@gmail.com`
+
+## Daily Download Digest Emails
+
+- Workflow: `.github/workflows/release-download-digest.yml`
+- Script: `scripts/download-digest.js`
+- Schedule: 9:00 AM PT daily (with UTC cron + PT hour guard)
+- Sources:
+  - VS Marketplace `downloadCount` for `kibitzsh.kibitz`
+  - GitHub Releases asset `download_count` for `kibitzsh/kibitz`
+- State cache file: `.cache/download-digest/state.json`
+- Behavior:
+  - first run initializes baseline (no email),
+  - zero-delta days skip email,
+  - positive delta sends digest email.
 
 ## Distribution Channels
 
