@@ -48,6 +48,42 @@ read_pkg_version() {
   node -p "require('./package.json').version"
 }
 
+wait_for_marketplace_version() {
+  local expected="$1"
+  local current=""
+  local attempt=0
+  local max_attempts=24
+  while [[ $attempt -lt $max_attempts ]]; do
+    current="$(npx --yes @vscode/vsce show kibitzsh.kibitz --json | jq -r '.versions[0].version')"
+    if [[ "$current" == "$expected" ]]; then
+      echo "$current"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 5
+  done
+  echo "$current"
+  return 1
+}
+
+wait_for_npm_latest() {
+  local expected="$1"
+  local current=""
+  local attempt=0
+  local max_attempts=24
+  while [[ $attempt -lt $max_attempts ]]; do
+    current="$(npm dist-tag ls @kibitzsh/kibitz | awk '/^latest:/{print $2}')"
+    if [[ "$current" == "$expected" ]]; then
+      echo "$current"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 5
+  done
+  echo "$current"
+  return 1
+}
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Working tree must be clean before running cr release flow." >&2
   exit 1
@@ -91,7 +127,7 @@ if [[ "$SKIP_VSCODE" -eq 0 ]]; then
     exit 1
   fi
   run npm run publish:vscode
-  MARKETPLACE_VERSION="$(npx --yes @vscode/vsce show kibitzsh.kibitz --json | jq -r '.versions[0].version')"
+  MARKETPLACE_VERSION="$(wait_for_marketplace_version "$VERSION" || true)"
   if [[ "$MARKETPLACE_VERSION" != "$VERSION" ]]; then
     echo "Marketplace version mismatch: expected ${VERSION}, got ${MARKETPLACE_VERSION}" >&2
     exit 1
@@ -101,12 +137,12 @@ fi
 
 if [[ "$SKIP_NPM" -eq 0 ]]; then
   run npm run publish:npm
-  NPM_VERSION="$(npm view @kibitzsh/kibitz version)"
+  NPM_VERSION="$(wait_for_npm_latest "$VERSION" || true)"
   if [[ "$NPM_VERSION" != "$VERSION" ]]; then
-    echo "npm version mismatch: expected ${VERSION}, got ${NPM_VERSION}" >&2
+    echo "npm dist-tag mismatch: expected latest=${VERSION}, got latest=${NPM_VERSION}" >&2
     exit 1
   fi
-  echo "✓ npm version is ${NPM_VERSION}"
+  echo "✓ npm latest dist-tag is ${NPM_VERSION}"
 fi
 
 if [[ "$SKIP_BREW" -eq 0 ]]; then
