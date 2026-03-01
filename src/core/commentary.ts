@@ -13,6 +13,11 @@ import {
 } from './types'
 import { AnthropicProvider } from './providers/anthropic'
 import { OpenAIProvider } from './providers/openai'
+import {
+  DEFAULT_SUMMARY_INTERVAL_MS,
+  normalizeSummaryIntervalMs,
+  summaryIntervalMaxWaitMs,
+} from './summary-interval'
 
 const SYSTEM_PROMPT = `You oversee AI coding agents. Summarize what they did in plain language anyone can understand.
 
@@ -129,8 +134,6 @@ const SESSION_ID_PATTERNS: RegExp[] = [
 // Adaptive batching
 const MIN_BATCH_SIZE = 1
 const MAX_BATCH_SIZE = 40
-const IDLE_TIMEOUT_MS = 5000
-const MAX_WAIT_MS = 15000
 
 interface SessionState {
   events: KibitzEvent[]
@@ -489,6 +492,7 @@ export class CommentaryEngine extends EventEmitter {
   }
   private keyResolver: KeyResolver
   private paused = false
+  private summaryIntervalMs = DEFAULT_SUMMARY_INTERVAL_MS
   private enabledFormatStyleIds: CommentaryStyleId[] = DEFAULT_FORMAT_STYLE_IDS.slice()
   private lastFormatStyleId: CommentaryStyleId | null = null
 
@@ -540,6 +544,18 @@ export class CommentaryEngine extends EventEmitter {
     return this.enabledFormatStyleIds.slice()
   }
 
+  setSummaryIntervalMs(intervalMs: number): void {
+    const next = normalizeSummaryIntervalMs(intervalMs)
+    if (next === this.summaryIntervalMs) return
+    this.summaryIntervalMs = next
+    this.rearmPendingTimers()
+    this.emit('summary-interval-changed', this.summaryIntervalMs)
+  }
+
+  getSummaryIntervalMs(): number {
+    return this.summaryIntervalMs
+  }
+
   pause(): void {
     if (this.paused) return
     this.paused = true
@@ -572,11 +588,11 @@ export class CommentaryEngine extends EventEmitter {
 
     // Reset idle timer on each new event (wait for activity to settle)
     if (state.idleTimer) clearTimeout(state.idleTimer)
-    state.idleTimer = setTimeout(() => this.requestFlush(key, false), IDLE_TIMEOUT_MS)
+    state.idleTimer = setTimeout(() => this.requestFlush(key, false), this.idleTimeoutMs())
 
     // Start max-wait timer on first event in batch
     if (!state.maxTimer) {
-      state.maxTimer = setTimeout(() => this.requestFlush(key, true), MAX_WAIT_MS)
+      state.maxTimer = setTimeout(() => this.requestFlush(key, true), this.maxWaitMs())
     }
   }
 
@@ -616,6 +632,32 @@ export class CommentaryEngine extends EventEmitter {
     }
   }
 
+  private idleTimeoutMs(): number {
+    return this.summaryIntervalMs
+  }
+
+  private maxWaitMs(): number {
+    return summaryIntervalMaxWaitMs(this.summaryIntervalMs)
+  }
+
+  private rearmPendingTimers(): void {
+    if (this.paused) return
+    for (const [key, state] of this.sessions.entries()) {
+      if (state.events.length === 0) continue
+      if (this.queuedSessions.has(key)) continue
+
+      this.clearSessionTimers(state)
+
+      if (state.events.length >= MAX_BATCH_SIZE) {
+        this.enqueueFlush(key)
+        continue
+      }
+
+      state.idleTimer = setTimeout(() => this.requestFlush(key, false), this.idleTimeoutMs())
+      state.maxTimer = setTimeout(() => this.requestFlush(key, true), this.maxWaitMs())
+    }
+  }
+
   private requestFlush(key: string, force: boolean): void {
     const state = this.sessions.get(key)
     if (!state) return
@@ -626,7 +668,7 @@ export class CommentaryEngine extends EventEmitter {
 
     // Need minimum events for meaningful commentary unless force-flushing.
     if (!force && state.events.length < MIN_BATCH_SIZE) {
-      state.idleTimer = setTimeout(() => this.requestFlush(key, true), IDLE_TIMEOUT_MS)
+      state.idleTimer = setTimeout(() => this.requestFlush(key, true), this.idleTimeoutMs())
       return
     }
 
@@ -676,7 +718,7 @@ export class CommentaryEngine extends EventEmitter {
         if (state.events.length >= MIN_BATCH_SIZE) {
           this.enqueueFlush(key)
         } else if (!state.idleTimer) {
-          state.idleTimer = setTimeout(() => this.requestFlush(key, true), IDLE_TIMEOUT_MS)
+          state.idleTimer = setTimeout(() => this.requestFlush(key, true), this.idleTimeoutMs())
         }
       }
     }

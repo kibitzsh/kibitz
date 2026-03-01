@@ -14,6 +14,13 @@ import {
 } from '../core/types'
 import { inheritShellPath } from '../core/platform-support'
 import { SessionDispatchService } from '../core/session-dispatch'
+import {
+  parseSummaryIntervalInput,
+  summaryIntervalLabel,
+  summaryIntervalToken,
+  summaryIntervalTokensList,
+} from '../core/summary-interval'
+import { persistSharedSummaryIntervalMs, readSharedSummaryIntervalMs } from '../core/shared-settings'
 
 // Minimal ANSI helpers (no dependency on chalk).
 const c = {
@@ -86,6 +93,7 @@ ${c.bold('Slash commands:')}
   /focus <text>
   /model <id-or-label>
   /preset <id>
+  /interval <${summaryIntervalTokensList()}>
   /sessions
   /target <index|agent:sessionId|new-codex|new-claude>
 
@@ -196,8 +204,13 @@ async function main(): Promise<void> {
     getActiveSessions: () => watcher.getActiveSessions(),
   })
 
+  const initialSummaryIntervalMs = readSharedSummaryIntervalMs()
+  engine.setSummaryIntervalMs(initialSummaryIntervalMs)
+
   engine.setModel(options.model)
   if (options.focus) engine.setFocus(options.focus)
+
+  console.log(c.dim(`  Summary interval: ${summaryIntervalToken(engine.getSummaryIntervalMs())} (${summaryIntervalLabel(engine.getSummaryIntervalMs())})`))
 
   let selectedTarget: DispatchTarget = { kind: 'new-codex' }
 
@@ -273,6 +286,10 @@ async function main(): Promise<void> {
     printPromptLine()
   })
 
+  engine.on('summary-interval-changed', (intervalMs: number) => {
+    persistSharedSummaryIntervalMs(intervalMs)
+  })
+
   watcher.start()
 
   const rl = readline.createInterface({
@@ -340,6 +357,22 @@ async function main(): Promise<void> {
       }
       engine.setPreset(args)
       console.log(`  ${c.dim('Preset set to ' + engine.getPreset())}`)
+      return
+    }
+
+    if (command === 'interval') {
+      if (!args) {
+        console.log(`  ${c.dim(`Summary interval: ${summaryIntervalToken(engine.getSummaryIntervalMs())} (${summaryIntervalLabel(engine.getSummaryIntervalMs())})`)}`)
+        console.log(`  ${c.dim(`Usage: /interval <${summaryIntervalTokensList()}>`)}`)
+        return
+      }
+      const parsed = parseSummaryIntervalInput(args)
+      if (parsed == null) {
+        console.log(`  ${c.red(`Usage: /interval <${summaryIntervalTokensList()}>`)}`)
+        return
+      }
+      engine.setSummaryIntervalMs(parsed)
+      console.log(`  ${c.dim(`Summary interval set to ${summaryIntervalToken(parsed)} (${summaryIntervalLabel(parsed)})`)}`)
       return
     }
 

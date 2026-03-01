@@ -19,6 +19,7 @@ import {
 } from '../core/types'
 import { checkClaudeCliAvailable } from '../core/providers/anthropic'
 import { checkCodexCliAvailable } from '../core/providers/openai'
+import { persistSharedSummaryIntervalMs, readSharedSummaryIntervalMs } from '../core/shared-settings'
 import {
   persistFormatStyles,
   persistModel,
@@ -264,6 +265,7 @@ function ensureRuntime(context: vscode.ExtensionContext): void {
 
   watcher = new SessionWatcher()
   engine = new CommentaryEngine(noopKeyResolver)
+  engine.setSummaryIntervalMs(readSharedSummaryIntervalMs())
   dispatchService = new SessionDispatchService({
     getActiveSessions: () => watcher?.getActiveSessions() || [],
     launchInteractiveSession: (provider, prompt) => launchInteractiveFromPanel(provider, prompt),
@@ -290,6 +292,11 @@ function ensureRuntime(context: vscode.ExtensionContext): void {
     context.globalState.update('kibitz.formatStyles', styleIds)
     persistFormatStyles(context.globalStorageUri.fsPath, styleIds)
     panel?.updateFormatStyles(styleIds)
+  })
+
+  engine.on('summary-interval-changed', (intervalMs: number) => {
+    persistSharedSummaryIntervalMs(intervalMs)
+    panel?.updateSummaryInterval(intervalMs)
   })
 
   engine.on('commentary-start', (entry) => {

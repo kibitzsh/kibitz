@@ -57,7 +57,7 @@ This document defines Kibitz compatibility guarantees for session control and di
 ## Interface Parity Requirements
 
 - Both interfaces must support selecting an existing session target and new-session targets.
-- Both interfaces must preserve slash control behavior (`/focus`, `/model`, `/preset`, `/pause`, `/resume`).
+- Both interfaces must preserve slash control behavior (`/focus`, `/model`, `/preset`, `/interval`, `/pause`, `/resume`).
 - Both interfaces must send plain non-slash text to the selected dispatch target.
 - Dispatch statuses must be explicit (`queued`, `started`, `sent`, `failed`).
 

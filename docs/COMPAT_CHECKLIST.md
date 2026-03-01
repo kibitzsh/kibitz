@@ -29,7 +29,7 @@ Release must not ship unless all checks below pass.
 - [ ] Session count equals active-session list size.
 - [ ] Session title shown in feed matches selected session context.
 - [ ] Model selector shows all available connected-provider models.
-- [ ] Slash behavior still works (`/focus`, `/model`, `/preset`, `/pause`, `/resume`).
+- [ ] Slash behavior still works (`/focus`, `/model`, `/preset`, `/interval`, `/pause`, `/resume`).
 
 ## Gates
 

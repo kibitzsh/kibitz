@@ -13,6 +13,12 @@ import {
   ProviderStatus,
   SessionInfo,
 } from '../core/types'
+import {
+  DEFAULT_SUMMARY_INTERVAL_MS,
+  normalizeSummaryIntervalMs,
+  SUMMARY_INTERVAL_OPTIONS,
+  summaryIntervalTokensList,
+} from '../core/summary-interval'
 
 interface PanelHandlers {
   onDispatchPrompt?: (target: DispatchTarget, prompt: string) => void
@@ -24,6 +30,7 @@ type WebviewToExtensionMessage =
   | { type: 'model'; value: ModelId }
   | { type: 'preset'; value: string }
   | { type: 'format-styles'; value: CommentaryStyleId[] }
+  | { type: 'summary-interval'; value: number }
   | { type: 'show-event-summary'; value: boolean }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -41,6 +48,7 @@ type ExtensionToWebviewMessage =
   | { type: 'set-focus'; value: string }
   | { type: 'set-preset'; value: string }
   | { type: 'set-format-styles'; value: CommentaryStyleId[] }
+  | { type: 'set-summary-interval'; value: number }
   | { type: 'set-show-event-summary'; value: boolean }
   | { type: 'providers'; value: ProviderStatus[] }
   | { type: 'active-sessions'; value: SessionInfo[] }
@@ -92,6 +100,11 @@ export class KibitzPanel {
         return
       }
 
+      if (msg.type === 'summary-interval') {
+        this.engine.setSummaryIntervalMs(msg.value)
+        return
+      }
+
       if (msg.type === 'show-event-summary') {
         this.showEventSummary = !!msg.value
         this.context.globalState.update('kibitz.showEventSummary', this.showEventSummary)
@@ -139,6 +152,7 @@ export class KibitzPanel {
     this.postMessage({ type: 'model', value: this.engine.getModel() })
     this.postMessage({ type: 'set-preset', value: this.engine.getPreset() })
     this.postMessage({ type: 'set-format-styles', value: this.engine.getFormatStyles() })
+    this.postMessage({ type: 'set-summary-interval', value: this.engine.getSummaryIntervalMs() })
     this.postMessage({ type: 'set-show-event-summary', value: this.showEventSummary })
     this.postMessage({ type: 'providers', value: this.providers })
     this.postMessage({ type: 'active-sessions', value: [] })
@@ -186,6 +200,11 @@ export class KibitzPanel {
   updateFormatStyles(styleIds: CommentaryStyleId[]): void {
     if (this.disposed) return
     this.postMessage({ type: 'set-format-styles', value: styleIds.slice() })
+  }
+
+  updateSummaryInterval(intervalMs: number): void {
+    if (this.disposed) return
+    this.postMessage({ type: 'set-summary-interval', value: normalizeSummaryIntervalMs(intervalMs) })
   }
 
   updateProviders(providers: ProviderStatus[]): void {
@@ -237,6 +256,7 @@ export class KibitzPanel {
       this.engine.getModel(),
       this.engine.getPreset(),
       this.engine.getFormatStyles(),
+      this.engine.getSummaryIntervalMs(),
     )
   }
 }
@@ -247,6 +267,7 @@ export function getInlineHtml(
   initialModel: ModelId,
   initialPreset: string,
   initialFormatStyles: CommentaryStyleId[] = COMMENTARY_STYLE_OPTIONS.map((option) => option.id),
+  initialSummaryIntervalMs = DEFAULT_SUMMARY_INTERVAL_MS,
 ): string {
   const availableProviders = new Set(providers.filter((provider) => provider.available).map((provider) => provider.provider))
   const availableModels = MODELS.filter((model) => availableProviders.has(model.provider))
@@ -278,6 +299,12 @@ export function getInlineHtml(
       ? initialFormatStyles
       : COMMENTARY_STYLE_OPTIONS.map((option) => option.id),
   ).replace(/</g, '\\u003c')
+  const summaryIntervalOptionsData = JSON.stringify(SUMMARY_INTERVAL_OPTIONS).replace(/</g, '\\u003c')
+  const normalizedInitialSummaryIntervalMs = normalizeSummaryIntervalMs(initialSummaryIntervalMs)
+  const summaryIntervalOptionsHtml = SUMMARY_INTERVAL_OPTIONS.map((option) => {
+    const selected = option.ms === normalizedInitialSummaryIntervalMs ? ' selected' : ''
+    return `<option value="${option.ms}"${selected}>${escapeHtml(option.token)} (${escapeHtml(option.label)})</option>`
+  }).join('\n')
 
   const providerBadges = providers.map((provider) => {
     const dot = provider.available ? '●' : '○'
@@ -677,9 +704,31 @@ export function getInlineHtml(
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     overflow: visible;
-    white-space: nowrap;
+  }
+  .summary-interval-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #9ca3af;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .summary-interval-select {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.04);
+    color: #cbd5e1;
+    border: 1px solid rgba(100, 116, 139, 0.45);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    line-height: 1.2;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .summary-interval-select:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder, #0ea5e9);
   }
   .composer-meta .menu-trigger {
     background: transparent;
@@ -811,6 +860,10 @@ export function getInlineHtml(
       <button id="composer-send" class="send-btn" title="Send" aria-label="Send">➤</button>
     </div>
     <div class="composer-meta">
+      <label class="summary-interval-control" for="summary-interval-select">
+        <span>Summary every</span>
+        <select id="summary-interval-select" class="summary-interval-select">${summaryIntervalOptionsHtml}</select>
+      </label>
       <div class="menu-host">
         <button id="preset-menu-btn" class="menu-trigger" title="Summary tone" aria-label="Summary tone">
           <span class="icon">🎛</span>
@@ -841,6 +894,7 @@ export function getInlineHtml(
   const modelMenu = document.getElementById('model-menu');
   const modelMenuLabel = document.getElementById('model-menu-label');
   const presetSelect = document.getElementById('preset-select');
+  const summaryIntervalSelect = document.getElementById('summary-interval-select');
   const presetMenuBtn = document.getElementById('preset-menu-btn');
   const presetMenu = document.getElementById('preset-menu');
   const presetMenuLabel = document.getElementById('preset-menu-label');
@@ -856,7 +910,9 @@ export function getInlineHtml(
   const ALL_MODEL_OPTIONS = ${modelData};
   const FORMAT_STYLE_OPTIONS = ${formatStyleOptionsData};
   const INITIAL_FORMAT_STYLES = ${initialFormatStylesData};
+  const SUMMARY_INTERVAL_OPTIONS = ${summaryIntervalOptionsData};
   const FALLBACK_MODEL_ID = ${JSON.stringify(fallbackModel)};
+  const INITIAL_SUMMARY_INTERVAL_MS = ${normalizedInitialSummaryIntervalMs};
   const MODEL_PROVIDER = Object.fromEntries(ALL_MODEL_OPTIONS.map((opt) => [opt.id, opt.provider]));
   const PROVIDER_AGENT = { anthropic: 'claude', openai: 'codex' };
 
@@ -868,6 +924,7 @@ export function getInlineHtml(
     { name: 'focus', usage: '/focus <text>', insert: '/focus ', takesArg: true, description: 'Set focus guidance text' },
     { name: 'model', usage: '/model <id-or-label>', insert: '/model ', takesArg: true, description: 'Switch model' },
     { name: 'preset', usage: '/preset <id-or-label>', insert: '/preset ', takesArg: true, description: 'Switch template preset' },
+    { name: 'interval', usage: '/interval <${summaryIntervalTokensList()}>', insert: '/interval ', takesArg: false, description: 'Set summary interval' },
     { name: 'summary', usage: '/summary <on|off>', insert: '/summary ', takesArg: true, description: 'Show or hide event summary line' },
   ];
 
@@ -1298,6 +1355,32 @@ export function getInlineHtml(
 
   function optionLabel(option) {
     return String((option && option.textContent) || (option && option.value) || '').trim();
+  }
+
+  function normalizeSummaryIntervalOption(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return INITIAL_SUMMARY_INTERVAL_MS;
+    const option = SUMMARY_INTERVAL_OPTIONS.find((item) => Number(item.ms) === parsed);
+    return option ? Number(option.ms) : INITIAL_SUMMARY_INTERVAL_MS;
+  }
+
+  function summaryIntervalDescription(intervalMs) {
+    const normalized = normalizeSummaryIntervalOption(intervalMs);
+    const option = SUMMARY_INTERVAL_OPTIONS.find((item) => Number(item.ms) === normalized);
+    if (option && option.label) return String(option.label);
+    return String(Math.round(normalized / 1000)) + ' seconds';
+  }
+
+  function summaryIntervalUsage() {
+    return SUMMARY_INTERVAL_OPTIONS.map((item) => String(item.token || '')).filter(Boolean).join('|');
+  }
+
+  function applySummaryInterval(intervalMs, notifyExtension) {
+    const normalized = normalizeSummaryIntervalOption(intervalMs);
+    summaryIntervalSelect.value = String(normalized);
+    if (notifyExtension) {
+      vscode.postMessage({ type: 'summary-interval', value: normalized });
+    }
   }
 
   function syncModelMenuButton() {
@@ -1735,6 +1818,23 @@ export function getInlineHtml(
       pushSystemEntry('Preset set to ' + option.label, false);
       return 'clear';
     }
+    if (cmd.name === 'interval') {
+      if (!parsed.args) {
+        pushSystemEntry(
+          'Summary interval: ' + summaryIntervalDescription(summaryIntervalSelect.value) + ' (use /interval <' + summaryIntervalUsage() + '>)',
+          false,
+        );
+        return 'clear';
+      }
+      const option = resolveSelectOption(summaryIntervalSelect, parsed.args);
+      if (!option) {
+        pushSystemEntry('Usage: /interval <' + summaryIntervalUsage() + '>', true);
+        return 'keep';
+      }
+      applySummaryInterval(option.value, true);
+      pushSystemEntry('Summary interval set to ' + option.label, false);
+      return 'clear';
+    }
     if (cmd.name === 'summary') {
       const normalized = String(parsed.args || '').trim().toLowerCase();
       if (normalized !== 'on' && normalized !== 'off') {
@@ -2082,6 +2182,10 @@ export function getInlineHtml(
     syncPresetMenuButton();
   });
 
+  summaryIntervalSelect.addEventListener('change', () => {
+    applySummaryInterval(summaryIntervalSelect.value, true);
+  });
+
   modelMenuBtn.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -2201,6 +2305,7 @@ export function getInlineHtml(
   });
 
   refreshPauseButton();
+  applySummaryInterval(INITIAL_SUMMARY_INTERVAL_MS, false);
   setFormatStylesFromExtension(INITIAL_FORMAT_STYLES);
   renderPresetMenu();
   syncPresetMenuButton();
@@ -2330,6 +2435,11 @@ export function getInlineHtml(
 
     if (msg.type === 'set-format-styles') {
       setFormatStylesFromExtension(msg.value || []);
+      return;
+    }
+
+    if (msg.type === 'set-summary-interval') {
+      applySummaryInterval(msg.value, false);
       return;
     }
 

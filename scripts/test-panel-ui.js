@@ -91,6 +91,7 @@ async function main() {
     const composerSend = document.getElementById('composer-send');
     const styleMenuBtn = document.getElementById('style-menu-btn');
     const styleMenu = document.getElementById('style-menu');
+    const summaryIntervalSelect = document.getElementById('summary-interval-select');
     const modelSelect = document.getElementById('model-select');
     const sessionsBadge = document.getElementById('sessions');
     const feed = document.getElementById('feed');
@@ -100,6 +101,7 @@ async function main() {
     assert(composerSend, 'composer send should exist');
     assert(styleMenuBtn, 'style menu button should exist');
     assert(styleMenu, 'style menu should exist');
+    assert(summaryIntervalSelect, 'summary interval select should exist');
     assert(modelSelect, 'model select should exist');
 
     function badgeTexts() {
@@ -118,6 +120,16 @@ async function main() {
     assert(initialBadges.length >= 1, 'should render at least one target badge');
     assert(initialBadges[0].includes('/1 New session (Codex)'), 'first badge should be new codex session for GPT model');
     assert((styleMenuBtn.textContent || '').includes('(8)'), 'style menu button should show default style count');
+    assert.strictEqual(summaryIntervalSelect.value, '30000', 'summary interval default should be 30 seconds');
+
+    // Interval dropdown should emit summary-interval updates.
+    posted.length = 0;
+    summaryIntervalSelect.value = '3600000';
+    summaryIntervalSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await tick();
+    const intervalMsg = lastPosted(posted, 'summary-interval');
+    assert(intervalMsg, 'changing summary interval should emit summary-interval');
+    assert.strictEqual(intervalMsg.value, 3600000, 'summary interval payload should be milliseconds');
 
     // Style dropdown should emit selected style ids.
     posted.length = 0;
@@ -263,6 +275,7 @@ async function main() {
       ['/focus keep names clear', 'focus'],
       ['/model gpt-4o', 'model'],
       ['/preset newbie', 'preset'],
+      ['/interval 1h', 'summary-interval'],
       ['/summary on', 'show-event-summary'],
     ];
 
@@ -296,6 +309,10 @@ async function main() {
     sendWindowMessage(window, { type: 'set-show-event-summary', value: false });
     await tick();
     assert.strictEqual(document.body.classList.contains('show-event-summary'), false, 'summary should be hidden after set-show-event-summary false');
+
+    sendWindowMessage(window, { type: 'set-summary-interval', value: 300000 });
+    await tick();
+    assert.strictEqual(summaryIntervalSelect.value, '300000', 'summary interval select should sync from extension message');
 
     // Simulated session entry should use canonical active-session title, not mismatched incoming title.
     sendWindowMessage(window, {

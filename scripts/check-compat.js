@@ -41,7 +41,9 @@ function main() {
   runNodeScript(path.join(repoRoot, 'scripts', 'test-platform-dispatch.js'));
   runNodeScript(path.join(repoRoot, 'scripts', 'test-parsers-cross-platform.js'));
   runNodeScript(path.join(repoRoot, 'scripts', 'test-commentary-assessment.js'));
+  runNodeScript(path.join(repoRoot, 'scripts', 'test-commentary-interval.js'));
   runNodeScript(path.join(repoRoot, 'scripts', 'test-watcher-session-id.js'));
+  runNodeScript(path.join(repoRoot, 'scripts', 'test-summary-interval-persistence.js'));
 
   const requiredTokens = ['macOS', 'Windows', 'VS Code panel', 'Terminal CLI'];
 
