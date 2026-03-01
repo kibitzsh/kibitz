@@ -541,7 +541,9 @@ export class CommentaryEngine extends EventEmitter {
   }
 
   pause(): void {
+    if (this.paused) return
     this.paused = true
+    this.clearPendingFlushWork()
   }
 
   resume(): void {
@@ -605,6 +607,15 @@ export class CommentaryEngine extends EventEmitter {
     }
   }
 
+  private clearPendingFlushWork(): void {
+    this.flushQueue.length = 0
+    this.queuedSessions.clear()
+    for (const state of this.sessions.values()) {
+      this.clearSessionTimers(state)
+      state.events.length = 0
+    }
+  }
+
   private requestFlush(key: string, force: boolean): void {
     const state = this.sessions.get(key)
     if (!state) return
@@ -633,11 +644,21 @@ export class CommentaryEngine extends EventEmitter {
     if (this.generating) return
 
     while (this.flushQueue.length > 0) {
+      if (this.paused) {
+        this.clearPendingFlushWork()
+        return
+      }
+
       const key = this.flushQueue.shift()!
       this.queuedSessions.delete(key)
 
       const state = this.sessions.get(key)
       if (!state || state.events.length === 0) continue
+
+      if (this.paused) {
+        state.events.length = 0
+        continue
+      }
 
       const batch = state.events.splice(0)
       this.generating = true
