@@ -707,29 +707,6 @@ export function getInlineHtml(
     flex-wrap: wrap;
     overflow: visible;
   }
-  .summary-interval-control {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: #9ca3af;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-  .summary-interval-select {
-    appearance: none;
-    background: rgba(255, 255, 255, 0.04);
-    color: #cbd5e1;
-    border: 1px solid rgba(100, 116, 139, 0.45);
-    border-radius: 6px;
-    padding: 3px 8px;
-    font-size: 11px;
-    line-height: 1.2;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-  .summary-interval-select:focus {
-    outline: none;
-    border-color: var(--vscode-focusBorder, #0ea5e9);
-  }
   .composer-meta .menu-trigger {
     background: transparent;
     color: #9ca3af;
@@ -746,6 +723,7 @@ export function getInlineHtml(
     outline: none;
     box-shadow: none;
   }
+  .composer-meta #interval-menu-label,
   .composer-meta #preset-menu-label,
   .composer-meta #style-menu-label {
     color: #9ca3af;
@@ -860,10 +838,15 @@ export function getInlineHtml(
       <button id="composer-send" class="send-btn" title="Send" aria-label="Send">➤</button>
     </div>
     <div class="composer-meta">
-      <label class="summary-interval-control" for="summary-interval-select">
-        <span>Summary every</span>
-        <select id="summary-interval-select" class="summary-interval-select">${summaryIntervalOptionsHtml}</select>
-      </label>
+      <div class="menu-host">
+        <button id="interval-menu-btn" class="menu-trigger" title="Summary interval" aria-label="Summary interval">
+          <span class="icon">⏱</span>
+          <span id="interval-menu-label">Summary interval</span>
+          <span class="caret">▾</span>
+        </button>
+        <div id="interval-menu" class="menu-list hidden"></div>
+      </div>
+      <select id="summary-interval-select" class="native-select-hidden">${summaryIntervalOptionsHtml}</select>
       <div class="menu-host">
         <button id="preset-menu-btn" class="menu-trigger" title="Summary tone" aria-label="Summary tone">
           <span class="icon">🎛</span>
@@ -894,6 +877,9 @@ export function getInlineHtml(
   const modelMenu = document.getElementById('model-menu');
   const modelMenuLabel = document.getElementById('model-menu-label');
   const presetSelect = document.getElementById('preset-select');
+  const intervalMenuBtn = document.getElementById('interval-menu-btn');
+  const intervalMenu = document.getElementById('interval-menu');
+  const intervalMenuLabel = document.getElementById('interval-menu-label');
   const summaryIntervalSelect = document.getElementById('summary-interval-select');
   const presetMenuBtn = document.getElementById('preset-menu-btn');
   const presetMenu = document.getElementById('preset-menu');
@@ -1378,6 +1364,8 @@ export function getInlineHtml(
   function applySummaryInterval(intervalMs, notifyExtension) {
     const normalized = normalizeSummaryIntervalOption(intervalMs);
     summaryIntervalSelect.value = String(normalized);
+    renderIntervalMenu();
+    syncIntervalMenuButton();
     if (notifyExtension) {
       vscode.postMessage({ type: 'summary-interval', value: normalized });
     }
@@ -1399,6 +1387,15 @@ export function getInlineHtml(
     const aria = 'Summary tone: ' + label;
     presetMenuBtn.title = aria;
     presetMenuBtn.setAttribute('aria-label', aria);
+  }
+
+  function syncIntervalMenuButton() {
+    const option = summaryIntervalSelect.options[summaryIntervalSelect.selectedIndex] || null;
+    const label = option ? optionLabel(option) : 'Summary interval';
+    if (intervalMenuLabel) intervalMenuLabel.textContent = label;
+    const aria = 'Summary interval: ' + label;
+    intervalMenuBtn.title = aria;
+    intervalMenuBtn.setAttribute('aria-label', aria);
   }
 
   function renderModelMenu() {
@@ -1463,6 +1460,32 @@ export function getInlineHtml(
     });
   }
 
+  function renderIntervalMenu() {
+    const options = Array.from(summaryIntervalSelect.options);
+    intervalMenu.innerHTML = options.map((option) => {
+      const value = String(option.value || '');
+      const label = optionLabel(option);
+      const selected = value === summaryIntervalSelect.value ? ' selected' : '';
+      return (
+        '<div class="menu-option' + selected + '" data-value="' + escapeHtml(value) + '">' +
+          '<span>' + escapeHtml(label) + '</span>' +
+          '<span>' + (selected ? '✓' : '') + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    const items = intervalMenu.querySelectorAll('.menu-option[data-value]');
+    items.forEach((item) => {
+      item.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        const value = String(item.getAttribute('data-value') || '');
+        if (!value) return;
+        applySummaryInterval(value, true);
+        hideIntervalMenu();
+      });
+    });
+  }
+
   function normalizeFormatStyleIds(styleIds) {
     const requested = new Set(
       (Array.isArray(styleIds) ? styleIds : [])
@@ -1492,12 +1515,17 @@ export function getInlineHtml(
     presetMenu.classList.add('hidden');
   }
 
+  function hideIntervalMenu() {
+    intervalMenu.classList.add('hidden');
+  }
+
   function hideStyleMenu() {
     styleMenu.classList.add('hidden');
   }
 
   function hideAllMenus() {
     hideModelMenu();
+    hideIntervalMenu();
     hidePresetMenu();
     hideStyleMenu();
   }
@@ -1510,6 +1538,11 @@ export function getInlineHtml(
   function showPresetMenu() {
     hideAllMenus();
     presetMenu.classList.remove('hidden');
+  }
+
+  function showIntervalMenu() {
+    hideAllMenus();
+    intervalMenu.classList.remove('hidden');
   }
 
   function showStyleMenu() {
@@ -1531,6 +1564,14 @@ export function getInlineHtml(
       return;
     }
     hidePresetMenu();
+  }
+
+  function toggleIntervalMenu() {
+    if (intervalMenu.classList.contains('hidden')) {
+      showIntervalMenu();
+      return;
+    }
+    hideIntervalMenu();
   }
 
   function toggleStyleMenu() {
@@ -2184,6 +2225,16 @@ export function getInlineHtml(
 
   summaryIntervalSelect.addEventListener('change', () => {
     applySummaryInterval(summaryIntervalSelect.value, true);
+  });
+
+  intervalMenuBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleIntervalMenu();
+  });
+
+  intervalMenu.addEventListener('mousedown', (event) => {
+    event.stopPropagation();
   });
 
   modelMenuBtn.addEventListener('click', (event) => {
