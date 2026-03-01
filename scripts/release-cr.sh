@@ -84,6 +84,28 @@ wait_for_npm_latest() {
   return 1
 }
 
+wait_for_brew_formula() {
+  local expected_version="$1"
+  local expected_sha="$2"
+  local content=""
+  local attempt=0
+  local max_attempts=24
+  while [[ $attempt -lt $max_attempts ]]; do
+    content="$(
+      gh api 'repos/kibitzsh/homebrew-kibitz/contents/Formula/kibitz.rb?ref=main' --jq '.content' \
+        | tr -d '\n' \
+        | python3 -c 'import base64,sys; print(base64.b64decode(sys.stdin.read()).decode("utf-8"))'
+    )"
+    if printf '%s' "$content" | rg -q "kibitz-${expected_version}\\.tgz" \
+      && printf '%s' "$content" | rg -q "$expected_sha"; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 5
+  done
+  return 1
+}
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Working tree must be clean before running cr release flow." >&2
   exit 1
@@ -185,13 +207,8 @@ PY
     -f content="$NEW_CONTENT_B64" \
     -f sha="$FORMULA_SHA"
 
-  REMOTE_FORMULA="$(curl -sL https://raw.githubusercontent.com/kibitzsh/homebrew-kibitz/main/Formula/kibitz.rb)"
-  if ! printf '%s' "$REMOTE_FORMULA" | rg -q "kibitz-${VERSION}\\.tgz"; then
-    echo "Homebrew formula verification failed for version ${VERSION}" >&2
-    exit 1
-  fi
-  if ! printf '%s' "$REMOTE_FORMULA" | rg -q "$SHA"; then
-    echo "Homebrew formula verification failed for SHA ${SHA}" >&2
+  if ! wait_for_brew_formula "$VERSION" "$SHA"; then
+    echo "Homebrew formula verification failed for version ${VERSION} and SHA ${SHA}" >&2
     exit 1
   fi
   echo "✓ Homebrew formula updated to ${VERSION}"
