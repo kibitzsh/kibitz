@@ -2,7 +2,7 @@
   "name": "kibitz",
   "displayName": "Kibitz",
   "description": "Real-time decoded feed of AI agent actions — monitor multiple Claude Code & Codex sessions, see exactly what each agent is doing, and coordinate swarms efficiently",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "kibitzsh",
   "icon": "media/icon.png",
   "repository": {
@@ -49,8 +49,9 @@
     "check:session-names": "npm run build && npm run typecheck && node scripts/visual-session-names.js --once",
     "check:model-persistence": "npm run typecheck && node scripts/test-model-persistence.js",
     "deploy:vscode": "npm run check:compat && npm run typecheck && node scripts/deploy-vscode-extension.js",
+    "publish:vscode": "npx @vscode/vsce publish",
     "watch": "npm run build:ext -- --watch",
-    "package": "vsce package",
+    "package": "npx @vscode/vsce package",
     "publish:npm": "npm run build && node scripts/publish-npm.js"
   },
   "devDependencies": {

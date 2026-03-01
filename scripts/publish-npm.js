@@ -20,7 +20,9 @@ const scoped = {
 try {
   writeFileSync(pkgPath, JSON.stringify(scoped, null, 2) + '\n');
   console.log('→ Publishing as @kibitzsh/kibitz …');
-  execSync('npm publish', { stdio: 'inherit' });
+  const otp = process.env.NPM_OTP;
+  const otpFlag = otp ? ` --otp=${otp}` : '';
+  execSync(`npm publish${otpFlag}`, { stdio: 'inherit' });
   console.log('✓ Published');
 } finally {
   writeFileSync(pkgPath, original);
