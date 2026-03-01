@@ -11,6 +11,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load local release secrets when present (kept out of git via .gitignore).
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 SKIP_BUMP=0
 SKIP_PUSH=0
 SKIP_VSCODE=0

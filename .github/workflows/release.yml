@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Validate toolchain
+        run: |
+          gh --version
+          jq --version
+
+      - name: Run full release flow (no version bump in CI)
+        run: npm run cr -- --skip-bump --skip-push
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

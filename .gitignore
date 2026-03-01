@@ -2,5 +2,8 @@ node_modules/
 dist/
 *.vsix
 .DS_Store
+.env
+.env.*
+!.env.example
 CLAUDE.md
 AGENTS.md

@@ -130,6 +130,10 @@ npm run check:model-persistence
 2. Full guarded release flow:
    - `npm run cr`
 3. `npm run cr` performs checks/build, bumps version, publishes VS Code Marketplace + npm, verifies versions, updates Homebrew formula, and pushes tags.
+4. For GitHub auto-release on tag push, add repository secrets:
+   - `VSCE_PAT` (VS Marketplace publish PAT)
+   - `NPM_TOKEN` (npm publish token)
+   - `HOMEBREW_TAP_TOKEN` (GitHub token with write access to `kibitzsh/homebrew-kibitz`)
 
 ## Distribution Channels
 

@@ -1,4 +1,6 @@
 .gitignore
+.env
+.env.*
 src/**
 node_modules/**
 tsconfig.json
