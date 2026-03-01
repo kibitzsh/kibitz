@@ -124,13 +124,12 @@ npm run check:model-persistence
 
 ## Release Flow
 
-1. Bump `version` in `package.json`.
-2. Run:
-   - `npm run test:all`
-   - `npm run deploy:vscode` (local smoke)
-3. Create extension package:
-   - `npm run package` (builds `.vsix` via `vsce package`)
-4. Push git tag/release notes and attach `.vsix` to GitHub release (recommended).
+1. Local smoke and package:
+   - `npm run deploy:vscode` (local install to VS Code/Cursor)
+   - `npm run package` (builds `.vsix`)
+2. Full guarded release flow:
+   - `npm run cr`
+3. `npm run cr` performs checks/build, bumps version, publishes VS Code Marketplace + npm, verifies versions, updates Homebrew formula, and pushes tags.
 
 ## Distribution Channels
 
@@ -138,7 +137,7 @@ npm run check:model-persistence
 
 - Create publisher in VS Marketplace (if not already created).
 - Create Azure DevOps PAT with Marketplace publish scopes.
-- Login and publish with `vsce`.
+- Publish with `npm run publish:vscode` (`VSCE_PAT` required).
 - Recommended:
   - publish stable versions to Marketplace,
   - keep `.vsix` artifacts in GitHub Releases for manual install/rollback.

@@ -46,7 +46,7 @@ If user accidentally types Cyrillic characters (wrong keyboard layout), convert 
 7. **Version commit** — `git add package.json && git commit -m "chore: bump version to <VERSION>"`
 8. **Tag** — `git tag v<VERSION>`
 9. **Push with tag** — `git push origin master --tags`
-10. **Publish VS Code extension** — `npm run deploy:vscode`
+10. **Publish VS Code extension** — `npm run publish:vscode`
 11. **Publish npm** — `node scripts/publish-npm.js`
 12. **Update Homebrew formula** — get SHA256 and update the tap:
     ```bash
@@ -73,7 +73,7 @@ Distribution is **not** via install scripts — users install through these chan
 
 | Channel | How |
 |---------|-----|
-| **VS Code Marketplace** | `npm run deploy:vscode` (runs `vsce publish` via `scripts/deploy-vscode-extension.js`) |
+| **VS Code Marketplace** | `npm run publish:vscode` (runs `vsce publish`) |
 | **npm** | `npm publish` (publishes the CLI as `kibitz` binary) |
 | **Homebrew** | Update the Homebrew tap formula with new version + SHA256 |
 
@@ -182,10 +182,15 @@ kibitz/
 ## VS Code Marketplace Deployment
 
 ```bash
-npm run deploy:vscode   # Runs scripts/deploy-vscode-extension.js
-# or manually:
+npm run deploy:vscode   # Local smoke deploy to ~/.vscode/extensions and ~/.cursor/extensions
 npm run package         # → kibitz-x.x.x.vsix
-npx vsce publish        # Publish to marketplace (requires PAT in VSCE_PAT env)
+npm run publish:vscode  # Publish to marketplace (requires PAT in VSCE_PAT env)
+```
+
+For one-command guarded release flow (checks, publish verification, npm, Homebrew, push/tags):
+
+```bash
+npm run cr
 ```
 
 - Publisher: `kibitzsh`

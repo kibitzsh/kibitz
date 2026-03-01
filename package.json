@@ -52,7 +52,8 @@
     "publish:vscode": "npx @vscode/vsce publish",
     "watch": "npm run build:ext -- --watch",
     "package": "npx @vscode/vsce package",
-    "publish:npm": "npm run build && node scripts/publish-npm.js"
+    "publish:npm": "npm run build && node scripts/publish-npm.js",
+    "cr": "bash scripts/release-cr.sh"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
