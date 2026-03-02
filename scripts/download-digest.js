@@ -5,6 +5,8 @@ const https = require('node:https');
 
 const DEFAULT_MARKETPLACE_EXTENSION_ID = 'kibitzsh.kibitz';
 const DEFAULT_GITHUB_REPO = 'kibitzsh/kibitz';
+const DEFAULT_NPM_PACKAGE = '@kibitzsh/kibitz';
+const DEFAULT_HOMEBREW_TAP_REPO = 'kibitzsh/homebrew-kibitz';
 const DEFAULT_STATE_FILE = path.join('.cache', 'download-digest', 'state.json');
 const DEFAULT_FROM_EMAIL = 'stats@kibitz.sh';
 const DEFAULT_TO_EMAIL = 'vasilytrofimchuk@gmail.com';
@@ -13,6 +15,7 @@ const USER_AGENT = 'kibitz-download-digest';
 const REQUEST_TIMEOUT_MS = 10000;
 const GITHUB_PAGE_SIZE = 100;
 const GITHUB_MAX_PAGES = 20;
+const NPM_RANGE_START = '2000-01-01';
 
 function toNonNegativeInteger(value) {
   const numeric = Number(value);
@@ -48,6 +51,18 @@ function formatDatePt(date = new Date()) {
     month: '2-digit',
     day: '2-digit',
   }).format(date);
+}
+
+function utcDateString(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function parseIsoTimestamp(value) {
+  const text = String(value || '').trim();
+  if (!text) return undefined;
+  const parsedMs = Date.parse(text);
+  if (!Number.isFinite(parsedMs)) return undefined;
+  return new Date(parsedMs).toISOString();
 }
 
 async function requestJson({
@@ -130,6 +145,14 @@ function parseMarketplaceDownloadCount(payload) {
   return parsed;
 }
 
+function parseNpmDownloadCount(payload) {
+  const parsed = toNonNegativeInteger(payload?.downloads);
+  if (parsed == null) {
+    throw new Error(`npm downloads payload is invalid: ${JSON.stringify(payload)}`);
+  }
+  return parsed;
+}
+
 function sumReleaseDownloadCounts(releasesPayload) {
   if (!Array.isArray(releasesPayload)) {
     throw new Error('GitHub releases payload must be an array');
@@ -148,6 +171,25 @@ function sumReleaseDownloadCounts(releasesPayload) {
     }
   }
   return total;
+}
+
+function parseHomebrewCloneEntries(payload) {
+  const clones = payload?.clones;
+  if (!Array.isArray(clones)) {
+    throw new Error('Homebrew tap clones payload missing clones array');
+  }
+
+  const entries = clones.map((clone) => {
+    const count = toNonNegativeInteger(clone?.count);
+    const timestamp = parseIsoTimestamp(clone?.timestamp);
+    if (count == null || !timestamp) {
+      throw new Error(`Invalid Homebrew clone entry: ${JSON.stringify(clone)}`);
+    }
+    return { count, timestamp };
+  });
+
+  entries.sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+  return entries;
 }
 
 async function queryMarketplaceDownloadCount(extensionId) {
@@ -220,43 +262,158 @@ async function queryGitHubReleaseDownloadCount(repo, token) {
   return total;
 }
 
+async function queryNpmDownloadCount(packageName, date = new Date()) {
+  const safePackageName = String(packageName || '').trim();
+  if (!safePackageName) {
+    throw new Error('npm package name cannot be empty');
+  }
+  const encodedPackageName = encodeURIComponent(safePackageName);
+  const rangeEnd = utcDateString(date);
+  const payload = await requestJson({
+    url: `https://api.npmjs.org/downloads/point/${NPM_RANGE_START}:${rangeEnd}/${encodedPackageName}`,
+    method: 'GET',
+  });
+  return parseNpmDownloadCount(payload);
+}
+
+async function queryHomebrewTapCloneEntries(tapRepo, token) {
+  const safeTapRepo = String(tapRepo || '').trim();
+  if (!safeTapRepo.includes('/')) {
+    throw new Error(`Invalid Homebrew tap repo slug: ${safeTapRepo}`);
+  }
+
+  const safeToken = String(token || '').trim();
+  if (!safeToken) {
+    throw new Error('HOMEBREW_TAP_TOKEN (or GITHUB_TOKEN) is required for Homebrew tap clone metrics');
+  }
+
+  const payload = await requestJson({
+    url: `https://api.github.com/repos/${safeTapRepo}/traffic/clones`,
+    method: 'GET',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      Authorization: `Bearer ${safeToken}`,
+    },
+  });
+  return parseHomebrewCloneEntries(payload);
+}
+
+function computeHomebrewTapCumulative({
+  previousTotal,
+  previousLastProcessedAt,
+  cloneEntries,
+}) {
+  const normalizedPreviousTotal = toNonNegativeInteger(previousTotal);
+  const normalizedPreviousLastProcessedAt = parseIsoTimestamp(previousLastProcessedAt);
+  const latestTimestamp = cloneEntries.length > 0 ? cloneEntries[cloneEntries.length - 1].timestamp : '';
+
+  if (cloneEntries.length === 0) {
+    return {
+      total: normalizedPreviousTotal || 0,
+      lastProcessedAt: normalizedPreviousLastProcessedAt || '',
+      detectedNewCount: 0,
+      bootstrapped: normalizedPreviousTotal == null || !normalizedPreviousLastProcessedAt,
+    };
+  }
+
+  if (normalizedPreviousTotal == null || !normalizedPreviousLastProcessedAt) {
+    const bootstrapTotal = normalizedPreviousTotal != null
+      ? normalizedPreviousTotal
+      : cloneEntries.reduce((sum, entry) => sum + entry.count, 0);
+    return {
+      total: bootstrapTotal,
+      lastProcessedAt: latestTimestamp,
+      detectedNewCount: 0,
+      bootstrapped: true,
+    };
+  }
+
+  let detectedNewCount = 0;
+  const previousTimestampMs = Date.parse(normalizedPreviousLastProcessedAt);
+  for (const entry of cloneEntries) {
+    if (Date.parse(entry.timestamp) > previousTimestampMs) {
+      detectedNewCount += entry.count;
+    }
+  }
+
+  return {
+    total: normalizedPreviousTotal + detectedNewCount,
+    lastProcessedAt: Date.parse(latestTimestamp) > previousTimestampMs
+      ? latestTimestamp
+      : normalizedPreviousLastProcessedAt,
+    detectedNewCount,
+    bootstrapped: false,
+  };
+}
+
+function calculateDelta(previousValue, currentValue) {
+  const previous = toNonNegativeInteger(previousValue);
+  const current = toNonNegativeInteger(currentValue);
+  if (current == null) {
+    throw new Error(`Current metric value must be non-negative: ${String(currentValue)}`);
+  }
+  if (previous == null) {
+    return { delta: 0, rollback: false, initialized: false };
+  }
+  if (current < previous) {
+    return { delta: 0, rollback: true, initialized: true };
+  }
+  return { delta: current - previous, rollback: false, initialized: true };
+}
+
 function evaluateSnapshot(previousState, currentState) {
   if (!previousState) {
     return {
       isFirstRun: true,
       marketplaceDelta: 0,
       githubDelta: 0,
+      npmDelta: 0,
+      homebrewDelta: 0,
       totalDelta: 0,
       hadCounterRollback: false,
     };
   }
 
-  const marketplaceDelta = Math.max(0, currentState.marketplaceDownloadCount - previousState.marketplaceDownloadCount);
-  const githubDelta = Math.max(0, currentState.githubReleaseDownloadCount - previousState.githubReleaseDownloadCount);
-  const hadCounterRollback = (
-    currentState.marketplaceDownloadCount < previousState.marketplaceDownloadCount
-    || currentState.githubReleaseDownloadCount < previousState.githubReleaseDownloadCount
-  );
+  const marketplace = calculateDelta(previousState.marketplaceDownloadCount, currentState.marketplaceDownloadCount);
+  const github = calculateDelta(previousState.githubReleaseDownloadCount, currentState.githubReleaseDownloadCount);
+  const npm = calculateDelta(previousState.npmDownloadCount, currentState.npmDownloadCount);
+  const homebrew = calculateDelta(previousState.homebrewTapCloneCount, currentState.homebrewTapCloneCount);
 
   return {
     isFirstRun: false,
-    marketplaceDelta,
-    githubDelta,
-    totalDelta: marketplaceDelta + githubDelta,
-    hadCounterRollback,
+    marketplaceDelta: marketplace.delta,
+    githubDelta: github.delta,
+    npmDelta: npm.delta,
+    homebrewDelta: homebrew.delta,
+    totalDelta: marketplace.delta + github.delta + npm.delta + homebrew.delta,
+    hadCounterRollback: marketplace.rollback || github.rollback || npm.rollback || homebrew.rollback,
   };
 }
 
 function parseState(payload) {
   if (!payload || typeof payload !== 'object') return undefined;
+
   const marketplaceDownloadCount = toNonNegativeInteger(payload.marketplaceDownloadCount);
   const githubReleaseDownloadCount = toNonNegativeInteger(payload.githubReleaseDownloadCount);
   if (marketplaceDownloadCount == null || githubReleaseDownloadCount == null) return undefined;
-  return {
+
+  const state = {
     lastRunAt: typeof payload.lastRunAt === 'string' ? payload.lastRunAt : '',
     marketplaceDownloadCount,
     githubReleaseDownloadCount,
   };
+
+  const npmDownloadCount = toNonNegativeInteger(payload.npmDownloadCount);
+  if (npmDownloadCount != null) state.npmDownloadCount = npmDownloadCount;
+
+  const homebrewTapCloneCount = toNonNegativeInteger(payload.homebrewTapCloneCount);
+  if (homebrewTapCloneCount != null) state.homebrewTapCloneCount = homebrewTapCloneCount;
+
+  const homebrewLastProcessedAt = parseIsoTimestamp(payload.homebrewLastProcessedAt);
+  if (homebrewLastProcessedAt) state.homebrewLastProcessedAt = homebrewLastProcessedAt;
+
+  return state;
 }
 
 async function readState(stateFile) {
@@ -277,9 +434,16 @@ async function writeState(stateFile, state) {
   await fs.writeFile(stateFile, formatted, 'utf8');
 }
 
+function formatPreviousCount(value) {
+  const parsed = toNonNegativeInteger(value);
+  return parsed == null ? 'n/a (newly tracked)' : String(parsed);
+}
+
 function buildDigestEmailText({
   extensionId,
   githubRepo,
+  npmPackage,
+  homebrewTapRepo,
   now,
   evaluation,
   currentState,
@@ -294,8 +458,10 @@ function buildDigestEmailText({
     `New downloads since last snapshot: +${evaluation.totalDelta}`,
     `- VS Marketplace (${extensionId}): +${evaluation.marketplaceDelta} (total ${currentState.marketplaceDownloadCount})`,
     `- GitHub Releases (${githubRepo}): +${evaluation.githubDelta} (total ${currentState.githubReleaseDownloadCount})`,
+    `- npm (${npmPackage}): +${evaluation.npmDelta} (total ${currentState.npmDownloadCount})`,
+    `- Homebrew tap clones proxy (${homebrewTapRepo}): +${evaluation.homebrewDelta} (total ${currentState.homebrewTapCloneCount})`,
     '',
-    `Previous totals: marketplace=${previousState.marketplaceDownloadCount}, github=${previousState.githubReleaseDownloadCount}`,
+    `Previous totals: marketplace=${formatPreviousCount(previousState.marketplaceDownloadCount)}, github=${formatPreviousCount(previousState.githubReleaseDownloadCount)}, npm=${formatPreviousCount(previousState.npmDownloadCount)}, homebrew=${formatPreviousCount(previousState.homebrewTapCloneCount)}`,
   ];
   if (evaluation.hadCounterRollback) {
     lines.push('');
@@ -331,6 +497,8 @@ async function sendResendEmail({ apiKey, from, to, subject, text }) {
 async function run() {
   const extensionId = String(process.env.MARKETPLACE_EXTENSION_ID || DEFAULT_MARKETPLACE_EXTENSION_ID).trim();
   const githubRepo = String(process.env.GITHUB_REPO || DEFAULT_GITHUB_REPO).trim();
+  const npmPackage = String(process.env.NPM_PACKAGE || DEFAULT_NPM_PACKAGE).trim();
+  const homebrewTapRepo = String(process.env.HOMEBREW_TAP_REPO || DEFAULT_HOMEBREW_TAP_REPO).trim();
   const stateFile = String(process.env.DOWNLOAD_DIGEST_STATE_FILE || DEFAULT_STATE_FILE).trim();
   const enforceNineAmPt = normalizeBoolean(process.env.ENFORCE_9AM_PT, false);
 
@@ -341,16 +509,31 @@ async function run() {
     return;
   }
 
-  const [marketplaceDownloadCount, githubReleaseDownloadCount] = await Promise.all([
+  const previousState = await readState(stateFile);
+
+  const [marketplaceDownloadCount, githubReleaseDownloadCount, npmDownloadCount, homebrewCloneEntries] = await Promise.all([
     queryMarketplaceDownloadCount(extensionId),
     queryGitHubReleaseDownloadCount(githubRepo, process.env.GITHUB_TOKEN),
+    queryNpmDownloadCount(npmPackage, now),
+    queryHomebrewTapCloneEntries(
+      homebrewTapRepo,
+      process.env.HOMEBREW_TAP_TOKEN || process.env.GITHUB_TOKEN,
+    ),
   ]);
 
-  const previousState = await readState(stateFile);
+  const homebrewCumulative = computeHomebrewTapCumulative({
+    previousTotal: previousState?.homebrewTapCloneCount,
+    previousLastProcessedAt: previousState?.homebrewLastProcessedAt,
+    cloneEntries: homebrewCloneEntries,
+  });
+
   const currentState = {
     lastRunAt: now.toISOString(),
     marketplaceDownloadCount,
     githubReleaseDownloadCount,
+    npmDownloadCount,
+    homebrewTapCloneCount: homebrewCumulative.total,
+    homebrewLastProcessedAt: homebrewCumulative.lastProcessedAt,
   };
   const evaluation = evaluateSnapshot(previousState, currentState);
 
@@ -374,6 +557,8 @@ async function run() {
   const text = buildDigestEmailText({
     extensionId,
     githubRepo,
+    npmPackage,
+    homebrewTapRepo,
     now,
     evaluation,
     currentState,
@@ -402,13 +587,18 @@ if (require.main === module) {
 module.exports = {
   DEFAULT_MARKETPLACE_EXTENSION_ID,
   DEFAULT_GITHUB_REPO,
+  DEFAULT_NPM_PACKAGE,
+  DEFAULT_HOMEBREW_TAP_REPO,
   DEFAULT_STATE_FILE,
   DEFAULT_FROM_EMAIL,
   DEFAULT_TO_EMAIL,
   readLosAngelesHour,
   shouldRunAtNineAmPt,
   parseMarketplaceDownloadCount,
+  parseNpmDownloadCount,
+  parseHomebrewCloneEntries,
   sumReleaseDownloadCounts,
+  computeHomebrewTapCumulative,
   evaluateSnapshot,
   parseState,
   buildDigestEmailText,

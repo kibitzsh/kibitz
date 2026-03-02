@@ -113,6 +113,7 @@ node dist/cli/index.js
 npm run typecheck
 npm run check:compat
 npm run test:ui
+npm run test:download-digest
 npm run test:all
 ```
 
@@ -138,6 +139,7 @@ npm run check:model-persistence
    - `HOMEBREW_TAP_TOKEN` (GitHub token with write access to `kibitzsh/homebrew-kibitz`)
 5. For daily download digest email workflow (`.github/workflows/release-download-digest.yml`), add:
    - `RESEND_API_KEY` (Resend API key)
+   - `HOMEBREW_TAP_TOKEN` (GitHub token with read access to `kibitzsh/homebrew-kibitz` traffic API)
    - sender is fixed to `stats@kibitz.sh`
    - recipient is fixed to `vasilytrofimchuk@gmail.com`
 
@@ -146,14 +148,30 @@ npm run check:model-persistence
 - Workflow: `.github/workflows/release-download-digest.yml`
 - Script: `scripts/download-digest.js`
 - Schedule: 9:00 AM PT daily (with UTC cron + PT hour guard)
+- Sender: `stats@kibitz.sh`
+- Recipient: `vasilytrofimchuk@gmail.com`
 - Sources:
   - VS Marketplace `downloadCount` for `kibitzsh.kibitz`
   - GitHub Releases asset `download_count` for `kibitzsh/kibitz`
+  - npm range total downloads for `@kibitzsh/kibitz`
+  - Homebrew tap clone traffic proxy from `kibitzsh/homebrew-kibitz` (`/traffic/clones`)
 - State cache file: `.cache/download-digest/state.json`
 - Behavior:
   - first run initializes baseline (no email),
   - zero-delta days skip email,
   - positive delta sends digest email.
+- Manual run:
+  - GitHub Actions → `Daily Download Digest` → `Run workflow`
+- Local smoke test (with real send):
+  ```bash
+  RESEND_API_KEY=... \
+  RESEND_FROM_EMAIL=stats@kibitz.sh \
+  ALERT_EMAIL_TO=vasilytrofimchuk@gmail.com \
+  HOMEBREW_TAP_TOKEN=... \
+  ENFORCE_9AM_PT=0 \
+  DOWNLOAD_DIGEST_STATE_FILE=/tmp/kibitz-digest-test-state.json \
+  node scripts/download-digest.js
+  ```
 
 ## Distribution Channels
 

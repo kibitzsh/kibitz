@@ -92,7 +92,8 @@ npm run test:ui                     # Panel UI rendering tests
 npm run test:parsers                # Cross-platform parser tests
 npm run test:commentary             # Commentary assessment tests
 npm run test:watcher                # Watcher session ID tests
-npm run test:all                    # typecheck + check:compat + test:ui
+npm run test:download-digest        # Daily download digest logic tests
+npm run test:all                    # typecheck + check:compat + core test suite
 ```
 
 ### What each test covers
@@ -103,6 +104,7 @@ npm run test:all                    # typecheck + check:compat + test:ui
 | `test-parsers-cross-platform.js` | Claude + Codex JSONL parser correctness on mock data |
 | `test-commentary-assessment.js` | Commentary assessment scoring, direction/security signals |
 | `test-watcher-session-id.js` | Session ID extraction and deduplication |
+| `test-download-digest.js` | Marketplace/GitHub counter deltas and 9AM PT guard logic |
 | `check-compat.js` | API surface compatibility after build |
 
 ### Test rule on commit

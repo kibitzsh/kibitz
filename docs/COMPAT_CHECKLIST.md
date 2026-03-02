@@ -36,4 +36,14 @@ Release must not ship unless all checks below pass.
 - [ ] `npm run typecheck`
 - [ ] `npm run build`
 - [ ] `npm run check:compat`
+- [ ] `npm run test:download-digest`
 - [ ] CI workflow `compat.yml` passes on both macOS and Windows
+
+## Download Digest Validation
+
+- [ ] Workflow `.github/workflows/release-download-digest.yml` exists and is enabled.
+- [ ] Repository secret `RESEND_API_KEY` is configured.
+- [ ] Sender is `stats@kibitz.sh`.
+- [ ] Recipient is `vasilytrofimchuk@gmail.com`.
+- [ ] First run baseline behavior verified (no email).
+- [ ] Positive delta behavior verified (digest email sent).

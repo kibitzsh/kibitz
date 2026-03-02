@@ -37,6 +37,9 @@ jobs:
           ALERT_EMAIL_TO: vasilytrofimchuk@gmail.com
           MARKETPLACE_EXTENSION_ID: kibitzsh.kibitz
           GITHUB_REPO: kibitzsh/kibitz
+          NPM_PACKAGE: '@kibitzsh/kibitz'
+          HOMEBREW_TAP_REPO: kibitzsh/homebrew-kibitz
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           ENFORCE_9AM_PT: ${{ github.event_name == 'schedule' && '1' || '0' }}
         run: node scripts/download-digest.js
